@@ -271,10 +271,9 @@ private fun ServerFootRow(vm: LoginViewModel) {
             )
         }
         Spacer(Modifier.width(Spacing.sm))
-        Text(
-            text = if (isPublic) "使用自定义服务器 ›" else "更改服务器 ›",
-            fontSize = TvType.meta,
-            color = hc.text3,
+        // Text 带 heightIn 时内容会贴顶绘制，包进 Box 用 contentAlignment 真正居中，
+        // 与左侧胶囊（Row 内自然居中的文字）墨迹中线一致。
+        Box(
             modifier = Modifier
                 .heightIn(min = 56.dp)   // 与左侧胶囊同高，两侧块完全对称
                 .clip(RoundedCornerShape(14.dp))
@@ -283,8 +282,15 @@ private fun ServerFootRow(vm: LoginViewModel) {
                     focusedScale = 1.04f,
                     onClick = { vm.openServerDialog(ServerMode.CUSTOM) }
                 )
-                .padding(horizontal = 12.dp)
-        )
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isPublic) "使用自定义服务器 ›" else "更改服务器 ›",
+                fontSize = TvType.meta,
+                color = hc.text3
+            )
+        }
     }
 }
 

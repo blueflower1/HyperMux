@@ -259,31 +259,39 @@ private fun ServerFootRow(vm: LoginViewModel) {
                 .background(dotColor)
         )
         Spacer(Modifier.width(Spacing.sm))
-        Text(
-            text = when {
-                isPublic -> "公开服务器"
-                host.isNotBlank() -> host
-                else -> "当前未指定服务器"
-            },
-            fontSize = 12.5.sp,
-            color = if (!isPublic && host.isBlank()) hc.text3 else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        // Text 带 heightIn 时内容会贴顶绘制（Text 不会自己垂直居中），
+        // 所以两段文案都包进 Box 用 contentAlignment 真正居中，圆点与文字墨迹中线一致。
+        Box(
             modifier = Modifier
                 .weight(1f)
-                .heightIn(min = 44.dp)
-        )
-        Text(
-            text = if (isPublic) "使用自定义服务器 ›" else "更改服务器 ›",
-            fontSize = 12.5.sp,
-            color = hc.text3,
-            // 与左侧同字号同高度盒：两侧都撑满 44dp 行高、文字自动垂直居中，
-            // 不再用「只给一侧补 padding」的不对称撑高写法。
+                .heightIn(min = 44.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = when {
+                    isPublic -> "公开服务器"
+                    host.isNotBlank() -> host
+                    else -> "当前未指定服务器"
+                },
+                fontSize = 12.5.sp,
+                color = if (!isPublic && host.isBlank()) hc.text3 else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
+        Box(
             modifier = Modifier
                 .heightIn(min = 44.dp)
                 .padding(horizontal = Spacing.sm)
-                .bounceClick(pressedScale = 0.95f) { vm.openServerDialog(ServerMode.CUSTOM) }
-        )
+                .bounceClick(pressedScale = 0.95f) { vm.openServerDialog(ServerMode.CUSTOM) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isPublic) "使用自定义服务器 ›" else "更改服务器 ›",
+                fontSize = 12.5.sp,
+                color = hc.text3
+            )
+        }
     }
 }
 
