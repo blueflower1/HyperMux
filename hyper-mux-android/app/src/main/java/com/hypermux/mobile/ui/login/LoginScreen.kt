@@ -230,12 +230,15 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
 /**
  * 底部服务器行：状态圆点 + 节点名 + 右侧小字入口。
  * 整行点击 = 打开配置弹窗（预选当前模式）；右侧小字 = 预选"自定义服务器"进入。
- * 公开模式不出现地址；自定义模式显示用户自己的 host:port（去 scheme）。
+ * 公开模式不出现地址；自定义模式显示用户自己的 host:port（去 scheme）；
+ * 未注入公开地址且用户还没填过 → 显示"当前未指定服务器"占位提示（不留空白）。
+ * 左右两段文案同字号、同高度盒（都撑满 44dp 行高并垂直居中），杜绝左右高度不一致。
  */
 @Composable
 private fun ServerFootRow(vm: LoginViewModel) {
     val hc = hyperColors()
     val isPublic = vm.serverMode == ServerMode.PUBLIC
+    val host = vm.customUrl.toHostDisplay()
     val probe = vm.probeState()
     val dotColor = when (probe) {
         null -> hc.text3
@@ -257,25 +260,27 @@ private fun ServerFootRow(vm: LoginViewModel) {
         )
         Spacer(Modifier.width(Spacing.sm))
         Text(
-            text = if (isPublic) "公开服务器" else vm.customUrl.toHostDisplay(),
-            // 与右侧入口文案**同字号、同高度盒**（原来这里 13sp、右侧 12.5sp，
-            // 而且只有右侧带 heightIn(32dp)，同一行两段文案"高度"不一致）。
+            text = when {
+                isPublic -> "公开服务器"
+                host.isNotBlank() -> host
+                else -> "当前未指定服务器"
+            },
             fontSize = 12.5.sp,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = if (!isPublic && host.isBlank()) hc.text3 else MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier
                 .weight(1f)
-                .heightIn(min = 32.dp)
+                .heightIn(min = 44.dp)
         )
         Text(
             text = if (isPublic) "使用自定义服务器 ›" else "更改服务器 ›",
             fontSize = 12.5.sp,
             color = hc.text3,
-            // 32dp 高的文案盒里文字会自己垂直居中（真机实测：两侧墨迹行完全对齐），
-            // 不再用「只给右侧补上下 padding」这种左右不对称的撑高写法。
+            // 与左侧同字号同高度盒：两侧都撑满 44dp 行高、文字自动垂直居中，
+            // 不再用「只给一侧补 padding」的不对称撑高写法。
             modifier = Modifier
-                .heightIn(min = 32.dp)
+                .heightIn(min = 44.dp)
                 .padding(horizontal = Spacing.sm)
                 .bounceClick(pressedScale = 0.95f) { vm.openServerDialog(ServerMode.CUSTOM) }
         )

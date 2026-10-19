@@ -226,12 +226,15 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
 
 /**
  * 服务器行（可聚焦）：状态圆点 + 节点名 + 「使用自定义服务器 ›」入口。
- * 公开模式不出现地址（契约 §4.3）；自定义模式显示用户自己的 host:port。
+ * 公开模式不出现地址（契约 §4.3）；自定义模式显示用户自己的 host:port；
+ * 未注入公开地址且用户还没填过 → 显示"当前未指定服务器"占位提示（不留空白）。
+ * 左右两块同高（56dp）同字号，杜绝左右高度不一致。
  */
 @Composable
 private fun ServerFootRow(vm: LoginViewModel) {
     val hc = hyperColors()
     val isPublic = vm.serverMode == ServerMode.PUBLIC
+    val host = vm.customUrl.toHostDisplay()
     val dotColor = when (vm.probeState()) {
         null -> hc.text3
         true -> MaterialTheme.colorScheme.primary
@@ -256,9 +259,13 @@ private fun ServerFootRow(vm: LoginViewModel) {
             )
             Spacer(Modifier.width(Spacing.sm))
             Text(
-                text = if (isPublic) "公开服务器" else vm.customUrl.toHostDisplay(),
+                text = when {
+                    isPublic -> "公开服务器"
+                    host.isNotBlank() -> host
+                    else -> "当前未指定服务器"
+                },
                 fontSize = TvType.meta,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (!isPublic && host.isBlank()) hc.text3 else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -269,13 +276,14 @@ private fun ServerFootRow(vm: LoginViewModel) {
             fontSize = TvType.meta,
             color = hc.text3,
             modifier = Modifier
+                .heightIn(min = 56.dp)   // 与左侧胶囊同高，两侧块完全对称
                 .clip(RoundedCornerShape(14.dp))
                 .tvClickable(
                     shape = RoundedCornerShape(14.dp),
                     focusedScale = 1.04f,
                     onClick = { vm.openServerDialog(ServerMode.CUSTOM) }
                 )
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(horizontal = 12.dp)
         )
     }
 }
