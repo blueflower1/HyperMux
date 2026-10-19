@@ -67,7 +67,7 @@ import com.hypermux.tv.ui.tv.tvClickable
  * - 顶栏返回按钮 + 标题 → [TvTopBar]（返回按钮同样可聚焦；BACK 键与按钮两条路都能返回）；
  * - 标题下方**整宽胶囊搜索条**（可触摸输入）→ 可聚焦的「本分类内搜索」行，
  *   按 OK 弹出 [TvTextInputPanel]（自绘键盘）——遥控器无法在页面内直接打字；
- * - 竖版海报**3 列** → **6 列**（1080p 基准；卡片间距 24dp 与首页 rail 统一）；
+ * - 竖版海报**3 列** → **4 列**（1080p 基准；卡片间距 24dp 与首页 rail 统一）；
  * - 触底分页逻辑保持不变（`snapshotFlow { gridState.layoutInfo }`）。
  */
 @Composable

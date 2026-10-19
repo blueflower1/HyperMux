@@ -83,20 +83,8 @@ fun NavController.navigateCategory(categoryId: Long, name: String? = null) =
         it.getLong("categoryId") == categoryId
     }
 
-/** 「全局搜索」统一入口（防连点）。 */
-fun NavController.navigateSearch() = navigateOnce(Route.Search, Route.Search)
-
 /** 「历史」统一入口（防连点）。 */
 fun NavController.navigateHistory() = navigateOnce(Route.History, Route.History)
-
-/** 「我的下载」统一入口（防连点）。 */
-fun NavController.navigateDownloads() = navigateOnce(Route.Downloads, Route.Downloads)
-
-/** 「单片下载详情」统一入口（防连点）：同一部片重复点 → 忽略。 */
-fun NavController.navigateDownloadDetail(movieId: Long) =
-    navigateOnce(Route.DownloadDetail, Route.downloadDetail(movieId)) {
-        it.getLong("movieId") == movieId
-    }
 
 /**
  * 返回上级（二级页 / 详情页顶栏的返回按钮与 BACK 键共用）。

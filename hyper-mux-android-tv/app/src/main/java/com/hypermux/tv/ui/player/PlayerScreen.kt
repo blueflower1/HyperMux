@@ -90,7 +90,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
-import com.hypermux.tv.data.cache.MediaCacheManager
 import com.hypermux.tv.ui.common.fmtDurationMs
 import com.hypermux.tv.ui.theme.Motion
 import com.hypermux.tv.ui.theme.Spacing
@@ -175,7 +174,7 @@ fun PlayerScreen(
     val activity = context as? Activity
 
     // 播放器单实例（§6.7：切集 = 换 MediaItem，不重建）
-    val controller = remember { PlayerController(context, vm.cacheManager) }
+    val controller = remember { PlayerController(context) }
     DisposableEffect(Unit) {
         onDispose { controller.release() }
     }
@@ -255,15 +254,11 @@ fun PlayerScreen(
         showSpeed = false
     }
 
-    // ---- 播放源就绪 → 装配 MediaItem（§6.2；本地优先：已完整下载的集走缓存 URI，不触网）----
+    // ---- 播放源就绪 → 装配 MediaItem（§6.2）----
     LaunchedEffect(playUrl) {
         val pu = playUrl ?: return@LaunchedEffect
-        val local = MediaCacheManager.isCacheUri(pu.url)
-        if (!local) controller.applyHeaders(pu.headers)
-        controller.play(
-            MediaItem.Builder().setUri(pu.url).build(),
-            fromLocalCache = local
-        )
+        controller.applyHeaders(pu.headers)
+        controller.play(MediaItem.Builder().setUri(pu.url).build())
     }
 
     // ---- 「记忆上次倍速」：进页面把上次倍速套到 player ----

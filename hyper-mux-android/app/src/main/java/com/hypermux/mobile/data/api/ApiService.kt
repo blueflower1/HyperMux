@@ -13,6 +13,7 @@ import com.hypermux.mobile.data.model.PlayUrlReq
 import com.hypermux.mobile.data.model.PlayUrlVo
 import com.hypermux.mobile.data.model.ProgressReq
 import com.hypermux.mobile.data.model.ProgressVo
+import com.hypermux.mobile.data.model.QrIdReq
 import com.hypermux.mobile.data.model.SeasonsVo
 import com.hypermux.mobile.data.model.SessionVo
 import com.hypermux.mobile.data.model.UpdateInfo
@@ -36,6 +37,14 @@ interface ApiService {
 
     @POST("api/app/auth/login")
     suspend fun login(@Body req: LoginReq): ApiResponse<SessionVo>
+
+    /** 扫码登录（需登录态）：已扫到 TV 登录码 → TV 显示「已扫码待确认」 */
+    @POST("api/app/auth/qr/scan")
+    suspend fun qrScan(@Body req: QrIdReq): ApiResponse<Boolean>
+
+    /** 扫码登录（需登录态）：确认登录，token 由 TV 轮询取走 */
+    @POST("api/app/auth/qr/confirm")
+    suspend fun qrConfirm(@Body req: QrIdReq): ApiResponse<Boolean>
 
     @GET("api/app/home")
     suspend fun home(): ApiResponse<HomeVo>

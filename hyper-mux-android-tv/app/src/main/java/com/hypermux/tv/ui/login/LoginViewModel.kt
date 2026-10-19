@@ -17,9 +17,13 @@ import com.hypermux.tv.data.repo.AuthRepo
 import com.hypermux.tv.data.repo.ServerMode
 import com.hypermux.tv.data.repo.SettingsRepo
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** 二维码面板状态（LoginScreen 据此渲染二维码与文案） */
+enum class QrState { IDLE, LOADING, ACTIVE, SCANNED, UNSUPPORTED, UNREACHABLE }
 
 /**
  * 登录页状态与动作（契约 §3.1 / §4.3）。
@@ -65,6 +69,19 @@ class LoginViewModel @Inject constructor(
     var errorMsg by mutableStateOf<String?>(null)
         private set
 
+    // ---- 扫码登录（QR 引擎：create → 轮询 status → CONFIRMED 投递会话；过期自动重建） ----
+
+    var qrState by mutableStateOf(QrState.IDLE)
+        private set
+
+    /** 二维码内容（仅不透明 qrId，不含任何秘密）；null = 当前无码可画 */
+    var qrPayload by mutableStateOf<String?>(null)
+        private set
+
+    /** 服务器配置变更 → 引擎重启（内层轮询发现代际变化即退出重来） */
+    @Volatile
+    private var qrGeneration = 0
+
     init {
         viewModelScope.launch {
             // 模式：持久化值（SettingsRepo 内含旧版升级推导：存过地址 → CUSTOM）
@@ -74,6 +91,77 @@ class LoginViewModel @Inject constructor(
                 val saved = settingsRepo.serverUrl.first()
                 saved?.takeIf { it.isNotBlank() && it != AppConfig.PRESET_SERVER_URL }
                     ?.let { customUrl = it }
+            }
+            // 首请求前把当前档位落盘（与 login() 同一动作）：全新安装时 DataStore 里没有
+            // SERVER_URL，ServerUrlInterceptor 会回退占位 localhost 被拒 —— 密码登录因为
+            // login() 先 applyServer 所以正常，QR 引擎也必须先 apply 才能拿到可用地址。
+            settingsRepo.applyServer(serverMode, if (serverMode == ServerMode.CUSTOM) customUrl else null)
+            // 引擎在配置就绪后才启动（同一协程内串行，杜绝首请求抢跑）
+            qrEngine()
+        }
+    }
+
+    /**
+     * 扫码登录引擎（与密码登录并存，互不干扰）：
+     * create 一次性登录码 → 每 2s 轮询状态 → CONFIRMED 拿到 session 后走与密码登录
+     * 完全相同的 saveSession（导航层自动跳首页）；EXPIRED 自动重建；
+     * 服务器不支持（404/405）显示占位并慢速重试，服务器升级后自动恢复。
+     */
+    private suspend fun qrEngine() {
+        while (true) {
+            val gen = qrGeneration
+            val url = effectiveUrl()
+            if (url.isBlank()) {
+                qrState = QrState.IDLE
+                qrPayload = null
+                delay(1000)
+                continue
+            }
+            qrState = QrState.LOADING
+            qrPayload = null
+            val createdResult = safeApiCall(gson) { api.qrCreate() }
+            if (gen != qrGeneration) continue
+            val created = createdResult as? ApiResult.Ok
+            if (created == null) {
+                val code = (createdResult as ApiResult.Err).code
+                // 404/405：路径不存在；401/403：旧版 jar 未豁免 qr 路径被拦截器挡下 —— 都是「服务器版本不支持扫码」
+                qrState = if (code == 401 || code == 403 || code == 404 || code == 405) QrState.UNSUPPORTED else QrState.UNREACHABLE
+                delay(if (qrState == QrState.UNSUPPORTED) 30_000L else 5_000L)
+                continue
+            }
+            val qrId = created.data.qrId
+            qrPayload = "hypermux://tv-login?id=$qrId"
+            qrState = QrState.ACTIVE
+            while (true) {
+                delay(2000)
+                if (gen != qrGeneration) break
+                val stResult = safeApiCall(gson) { api.qrStatus(qrId) }
+                if (gen != qrGeneration) break
+                val st = (stResult as? ApiResult.Ok)?.data
+                if (st == null) {
+                    qrState = QrState.UNREACHABLE
+                    break
+                }
+                when (st.state) {
+                    "PENDING" -> Unit  // 未被扫：继续轮询，勿重建（重建会打爆 create 限频）
+                    "SCANNED" -> qrState = QrState.SCANNED
+                    "CONFIRMED" -> {
+                        val session = st.session
+                        if (session != null) {
+                            qrPayload = null
+                            authRepo.saveSession(session)   // 导航层自动跳首页
+                            return
+                        }
+                        // session 已被取走（理论不会走到）：重建登录码
+                        qrState = QrState.LOADING
+                        break
+                    }
+                    // EXPIRED（含未知状态兜底）：重建登录码
+                    else -> {
+                        qrState = QrState.LOADING
+                        break
+                    }
+                }
             }
         }
     }
@@ -140,6 +228,7 @@ class LoginViewModel @Inject constructor(
             serverMode = ServerMode.PUBLIC
         }
         lastProbe = null   // 服务器变了，旧探测结论作废
+        qrGeneration++     // QR 引擎换服务器重来
         viewModelScope.launch {
             settingsRepo.applyServer(serverMode, if (serverMode == ServerMode.CUSTOM) customUrl else null)
         }

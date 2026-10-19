@@ -59,7 +59,6 @@ class SettingsRepo @Inject constructor(
         val REMEMBER_SPEED = booleanPreferencesKey("remember_speed")
         val LAST_SPEED = floatPreferencesKey("last_speed")
         // ---- 缓存偏好 ----
-        val WIFI_ONLY_DOWNLOAD = booleanPreferencesKey("wifi_only_download")
         // ---- App 自更新（§3.11）----
         // 这两个值都**按平台隔离**（见 UPDATE_PLATFORM 注释）
         val UPDATE_PLATFORM = stringPreferencesKey("update_platform")
@@ -222,20 +221,6 @@ class SettingsRepo @Inject constructor(
 
     suspend fun setLastSpeed(v: Float) {
         dataStore.edit { it[Keys.LAST_SPEED] = v }
-    }
-
-    // ---- 缓存偏好 ----
-
-    /**
-     * 仅 Wi-Fi 下载（默认开）：移动数据下不消耗流量去缓存，符合国内用户的默认预期。
-     * 由 [com.hypermux.tv.data.cache.MediaCacheManager.setWifiOnly] 转成 DownloadManager 的运行条件。
-     */
-    val wifiOnlyDownload: StateFlow<Boolean> = dataStore.data
-        .map { prefs -> prefs[Keys.WIFI_ONLY_DOWNLOAD] ?: true }
-        .stateIn(scope, SharingStarted.Eagerly, true)
-
-    suspend fun setWifiOnlyDownload(v: Boolean) {
-        dataStore.edit { it[Keys.WIFI_ONLY_DOWNLOAD] = v }
     }
 
     // ---- App 自更新（§3.11：启动 24h 节流 + 逐版本「稍后」记忆） ----

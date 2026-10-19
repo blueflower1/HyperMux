@@ -29,7 +29,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,7 +85,7 @@ import com.hypermux.mobile.ui.common.progressPct
 import com.hypermux.mobile.ui.common.remainText
 import com.hypermux.mobile.ui.layout.LocalLayoutProfile
 import com.hypermux.mobile.ui.navigation.BottomNavBar
-import com.hypermux.mobile.ui.navigation.navigateHistory
+import com.hypermux.mobile.ui.navigation.navigateScan
 import com.hypermux.mobile.ui.theme.Motion
 import com.hypermux.mobile.ui.theme.Spacing
 import com.hypermux.mobile.ui.theme.hyperColors
@@ -219,7 +219,7 @@ fun HomeScreen(
             Column(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
                 IQiyiTopBar(
                     onOpenSearch = onOpenSearch,
-                    onOpenHistory = { navController.navigateHistory() }
+                    onOpenScan = { navController.navigateScan() }
                 )
                 if (categories.isNotEmpty()) {
                     ChannelTabs(
@@ -412,9 +412,9 @@ fun HomeScreen(
     }
 }
 
-/** 顶栏（爱奇艺式：Logo + 搜索胶囊 + 右侧图标） */
+/** 顶栏（爱奇艺式：Logo + 搜索胶囊 + 右侧扫一扫图标；「历史」入口在底部 Tab） */
 @Composable
-private fun IQiyiTopBar(onOpenSearch: () -> Unit, onOpenHistory: () -> Unit) {
+private fun IQiyiTopBar(onOpenSearch: () -> Unit, onOpenScan: () -> Unit) {
     val hc = hyperColors()
     Row(
         modifier = Modifier
@@ -467,13 +467,13 @@ private fun IQiyiTopBar(onOpenSearch: () -> Unit, onOpenHistory: () -> Unit) {
         }
         Spacer(Modifier.width(Spacing.sm))
         Icon(
-            Icons.Filled.History,
-            contentDescription = "播放记录",
+            Icons.Filled.QrCodeScanner,
+            contentDescription = "扫一扫",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .size(24.dp)
                 .clip(MaterialTheme.shapes.extraLarge)
-                .bounceClick(pressedScale = 0.9f, onClick = onOpenHistory)
+                .bounceClick(pressedScale = 0.9f, onClick = onOpenScan)
         )
     }
 }

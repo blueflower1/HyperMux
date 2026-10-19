@@ -25,6 +25,13 @@ data class SessionVo(
     val user: SessionUserVo
 )
 
+// ---------- 扫码登录 TV 端（契约 3.1b） ----------
+
+data class QrCreateVo(val qrId: String, val expiresIn: Long)
+
+/** state: PENDING / SCANNED / CONFIRMED / EXPIRED；session 仅 CONFIRMED 时非空（一次性投递） */
+data class QrStatusVo(val state: String, val session: SessionVo?)
+
 // ---------- 首页聚合（契约 3.2） ----------
 
 data class HomeVo(

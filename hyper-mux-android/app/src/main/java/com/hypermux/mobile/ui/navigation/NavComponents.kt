@@ -132,6 +132,9 @@ fun NavController.navigateSearch() = navigateOnce(Route.Search, Route.Search)
 /** 「历史」统一入口（防连点）：首页右上角图标 push 进历史也走这里。 */
 fun NavController.navigateHistory() = navigateOnce(Route.History, Route.History)
 
+/** 「扫一扫」统一入口（防连点）：首页顶栏 / 「我的」页都走这里。 */
+fun NavController.navigateScan() = navigateOnce(Route.Scan, Route.Scan)
+
 /** 「我的下载」统一入口（防连点）。 */
 fun NavController.navigateDownloads() = navigateOnce(Route.Downloads, Route.Downloads)
 

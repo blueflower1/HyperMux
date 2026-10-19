@@ -4,15 +4,11 @@ package com.hypermux.tv.ui.movie
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -33,10 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -51,18 +44,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,8 +61,6 @@ import androidx.navigation.NavController
 import androidx.tv.foundation.ExperimentalTvFoundationApi
 import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
-import com.hypermux.tv.data.cache.DownloadState
-import com.hypermux.tv.data.cache.MediaCacheManager
 import com.hypermux.tv.data.model.MovieDetailVo
 import com.hypermux.tv.data.model.SeasonVo
 import com.hypermux.tv.data.model.VideoItemVo
@@ -84,26 +69,18 @@ import com.hypermux.tv.ui.common.ErrorState
 import com.hypermux.tv.ui.common.HyperButton
 import com.hypermux.tv.ui.common.HyperButtonStyle
 import com.hypermux.tv.ui.common.HyperChip
-import com.hypermux.tv.ui.common.HyperDialog
 import com.hypermux.tv.ui.common.SectionTitle
 import com.hypermux.tv.ui.common.SkeletonPosterGrid
-import com.hypermux.tv.ui.common.TvSidePanel
 import com.hypermux.tv.ui.common.ratingText
-import com.hypermux.tv.ui.theme.Motion
 import com.hypermux.tv.ui.theme.Spacing
 import com.hypermux.tv.ui.theme.TvSize
 import com.hypermux.tv.ui.theme.hyperColors
 import com.hypermux.tv.ui.tv.TvAutoFocus
-import com.hypermux.tv.ui.tv.TvKeys.isMenu
-import com.hypermux.tv.ui.tv.TvMessageOverlay
 import com.hypermux.tv.ui.tv.tvClickable
-import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 
 /**
  * 影片详情页（§5.5）：
  * 沉浸式头图 + 元数据（图上白色系文字） + 简介卡片 + "继续看"主按钮 + 季 Tab + 剧集方格网格。
- * 另提供离线缓存入口：集数格**长按**弹「缓存本集」、区块标题右侧「缓存本季」、已缓存格右上角小角标。
  */
 
 /** 压在图上的文字统一加暗阴影：叠了两层遮罩后，即使剧照亮部也能保证对比度 ≥ 4.5:1 */
@@ -117,59 +94,21 @@ fun MovieDetailScreen(
 ) {
     val vm: MovieViewModel = hiltViewModel()
 
-    // 页面内一次性提示（空间不足等）：走 TV 提示层，不用系统 Toast（电视上左下角小字读不清）
-    var message by remember { mutableStateOf<String?>(null) }
-
-    /** 显式下载确认的统一入口：先预检设备剩余空间（不足则提示，不入队） */
-    fun cacheChecked(videos: List<VideoItemVo>) {
-        if (!vm.cacheManager.canEnqueueForSpace()) {
-            message = "设备空间不足，请删除部分下载后再试"
-            return
-        }
-        vm.cacheEpisodes(videos)
-    }
-
     val detail by vm.detail.collectAsStateWithLifecycle(initialValue = null)
     val seasons by vm.seasons.collectAsStateWithLifecycle(initialValue = null)
     val isLoading by vm.isLoading.collectAsStateWithLifecycle(initialValue = true)
     val error by vm.error.collectAsStateWithLifecycle(initialValue = null)
-    val downloadStates by vm.downloadStates.collectAsStateWithLifecycle(initialValue = emptyMap())
 
     // 季 Tab（仅多季时展示）
     var selectedSeason by remember { mutableIntStateOf(seasons?.seasons?.firstOrNull()?.seasonNo ?: 1) }
     // 简介展开
     var introExpanded by remember { mutableStateOf(false) }
 
-    // 选集缓存底部面板：是否展示 + 打开时预选的集（长按某一格 → 预选该集）
-    var showCacheSheet by remember { mutableStateOf(false) }
-    var cachePreselect by remember { mutableStateOf<Set<Long>>(emptySet()) }
-
-    // 当前季的集数列表（提到网格之前：格角标的"已有分片"轮询需要它）
+    // 当前季的集数列表
     val singleMovie = detail?.episodeTotal?.let { it <= 1 } ?: false
     val seasonVideos = if (singleMovie) emptyList() else seasons?.seasons
         ?.firstOrNull { it.seasonNo == selectedSeason }
         ?.videos.orEmpty()
-    // 电影（单文件）：没有选集区，缓存入口放在主按钮右侧，这里先取到那一集
-    val singleVideo = if (singleMovie) vm.firstVideo() else null
-
-    // 已下载集的 id 快照：下载完成的集由 downloadStates 反映，
-    // **部分下载**（有字节但未完成）的状态变化只能靠轮询（Cache 的 content index 无变更回调），
-    // （Cache 的 content index 没有变更回调），3s 一次足够，也不会让网格频繁重组。
-    var cachedVideoIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
-    LaunchedEffect(seasonVideos, singleVideo?.id) {
-        while (true) {
-            cachedVideoIds = (seasonVideos + listOfNotNull(singleVideo)).asSequence()
-                .filter { vm.isCached(it.id) }
-                .map { it.id }
-                .toSet()
-            delay(3_000)
-        }
-    }
-    // 电影那一集的下载态（下载中显示百分比、完成显示"已缓存"）
-    val singleDownload = singleVideo?.let { downloadStates[MediaCacheManager.mediaIdOf(movieId, it.id)] }
-    val singleCached = singleVideo != null &&
-        (cachedVideoIds.contains(singleVideo.id) || singleDownload?.isCompleted == true)
-    val singleBusy = singleDownload?.isActive == true
 
     // 顶栏「随滚动渐显」的唯一数据源：与内容网格共用同一个滚动状态（网格在下方的分支里传入 state）
     val gridState = rememberLazyGridState()
@@ -252,18 +191,8 @@ fun MovieDetailScreen(
                                 detail = d,
                                 continueVideo = continueVideo,
                                 singleMovie = singleMovie,
-                                // 电影没有选集区，缓存入口放在主按钮右侧（剧集走「选集」标题旁的「缓存」）
-                                cacheLabel = singleVideo?.let {
-                                    when {
-                                        singleCached -> "已缓存"
-                                        singleBusy -> "${singleDownload?.percent?.roundToInt() ?: 0}%"
-                                        else -> "缓存"
-                                    }
-                                },
-                                cacheEnabled = singleVideo != null && !singleCached && !singleBusy,
                                 introExpanded = introExpanded,
                                 onToggleIntro = { introExpanded = !introExpanded },
-                                onCache = { if (singleVideo != null) cacheChecked(listOf(singleVideo)) },
                                 onPlay = {
                                     val target = continueVideo ?: vm.firstVideo()
                                     if (target != null) onPlay(movieId, target.id)
@@ -280,14 +209,7 @@ fun MovieDetailScreen(
                                 EpisodeHeader(
                                     seasons = seasons!!.seasons,
                                     selectedSeason = selectedSeason,
-                                    onSelect = { selectedSeason = it },
-                                    // 「缓存」：打开选集面板（多选后批量缓存）
-                                    onOpenCache = {
-                                        if (seasonVideos.isNotEmpty()) {
-                                            cachePreselect = emptySet()
-                                            showCacheSheet = true
-                                        }
-                                    }
+                                    onSelect = { selectedSeason = it }
                                 )
                             }
                         }
@@ -313,40 +235,14 @@ fun MovieDetailScreen(
                             items = seasonVideos,
                             key = { it.id }
                         ) { video ->
-                            val state = downloadStates[MediaCacheManager.mediaIdOf(movieId, video.id)]
                             EpisodeItem(
                                 video = video,
                                 // 唯一的「当前集」id（可能是 null：没有任何断点，或断点所在集不在本季列表里）
                                 currentVideoId = currentVideoId,
-                                onClick = { onPlay(movieId, video.id) },
-                                fullCached = cachedVideoIds.contains(video.id) || state?.isCompleted == true,
-                                downloadPercent = state?.takeIf { it.isActive }?.percent?.roundToInt(),
-                                // 长按 = 打开选集面板并预选该集（比"直接弹确认框"更接近爱奇艺的批量缓存体验）
-                                onLongPress = {
-                                    cachePreselect = setOf(video.id)
-                                    showCacheSheet = true
-                                }
+                                onClick = { onPlay(movieId, video.id) }
                             )
                         }
                     }
-                }
-
-                // 选集缓存面板（对齐爱奇艺：多选 + 全选/反选 + 底部「缓存(N)」）
-                if (showCacheSheet) {
-                    CacheSheet(
-                        movieId = movieId,
-                        movieTitle = d.title,
-                        seasonNo = selectedSeason,
-                        episodes = seasonVideos,
-                        cachedIds = cachedVideoIds,
-                        downloadStates = downloadStates,
-                        initialSelected = cachePreselect,
-                        onDismiss = { showCacheSheet = false },
-                        onConfirm = { picked ->
-                            cacheChecked(picked)
-                            showCacheSheet = false
-                        }
-                    )
                 }
             }
         }
@@ -354,9 +250,6 @@ fun MovieDetailScreen(
 
     // 进入页面 → 焦点给主播放按钮（§6.1）；数据未就绪时等 ready 变 true 再抢焦点
     TvAutoFocus(playRequester, ready = detail != null && !isLoading)
-
-    // 一次性提示（空间不足等）
-    message?.let { TvMessageOverlay(message = it, onDismiss = { message = null }) }
 }
 
 /**
@@ -378,11 +271,8 @@ private fun DetailHeader(
     detail: MovieDetailVo,
     continueVideo: VideoItemVo?,
     singleMovie: Boolean,
-    cacheLabel: String?,   // 非 null 才显示「缓存 / 已缓存 / xx%」（电影专用，剧集走选集标题旁的「缓存」）
-    cacheEnabled: Boolean,
     introExpanded: Boolean,
     onToggleIntro: () -> Unit,
-    onCache: () -> Unit,
     onPlay: () -> Unit,
     playRequester: FocusRequester,
     modifier: Modifier = Modifier
@@ -512,7 +402,7 @@ private fun DetailHeader(
                 }
             }
 
-            // 主按钮：继续播放（进入页面的首焦点）+ 电影专用的「缓存」
+            // 主按钮：继续播放（进入页面的首焦点）
             Spacer(Modifier.height(Spacing.xl))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -528,19 +418,11 @@ private fun DetailHeader(
                     },
                     onClick = onPlay,
                     icon = Icons.Filled.PlayArrow,
-                    // 只占右侧信息栏的宽度（不是整屏），且电影场景下自动给「缓存」按钮让位；
+                    // 只占右侧信息栏的宽度（不是整屏）；
                     // 固定 dp 宽度在 1080p(density 320) 下会挤爆右栏，跨密度下不可控
                     modifier = Modifier.weight(1f),
                     focusRequester = playRequester
                 )
-                if (cacheLabel != null) {
-                    HyperButton(
-                        text = cacheLabel,
-                        onClick = onCache,
-                        style = HyperButtonStyle.Secondary,
-                        enabled = cacheEnabled
-                    )
-                }
             }
         }
     }
@@ -648,27 +530,15 @@ private fun HeroPill(
     }
 }
 
-/** 剧集区标题（渐变竖条 + ExtraBold，与首页分区标题同风格）+ 季 Tab（仅多季时展示）+「缓存」 */
+/** 剧集区标题（渐变竖条 + ExtraBold，与首页分区标题同风格）+ 季 Tab（仅多季时展示） */
 @Composable
 private fun EpisodeHeader(
     seasons: List<SeasonVo>,
     selectedSeason: Int,
-    onSelect: (Int) -> Unit,
-    onOpenCache: () -> Unit
+    onSelect: (Int) -> Unit
 ) {
     Column(Modifier.fillMaxWidth()) {
-        SectionTitle(
-            text = "选集",
-            trailing = {
-                // 区块标题右侧的「缓存」：第二级样式、小尺寸，点开选集缓存面板
-                HyperButton(
-                    text = "缓存",
-                    onClick = onOpenCache,
-                    style = HyperButtonStyle.Secondary,
-                    small = true
-                )
-            }
-        )
+        SectionTitle(text = "选集")
         if (seasons.size > 1) {
             Spacer(Modifier.height(Spacing.md))
             // 多季时季 Tab 可能超出一屏；用 TvLazyRow 保证 D-pad 焦点自动滚进可视区
@@ -692,25 +562,21 @@ private fun EpisodeHeader(
  *   「从第 N 集继续」的那一集），绝不按每格自身的 video.progress 推断 —— 每格自推会把
  *   所有"看过一部分"的历史集都画成绿色边框的"当前集"（本次 bug 的根因）。
  *
- * 五态（新增缓存态）：
+ * 四态：
  *  1. 当前集（唯一）= 主色淡底（primary 12%）+ 1.5dp 主色描边 + 15sp Bold 主色字；
  *  2. 已看完（progress.finished == 1）= 更淡底（surfaceVariant 35%）+ 灰字 + 普通发丝线（无绿边框）；
  *  3. 看过一部分（有 progress、positionMs > 0、非当前集、未看完）= 普通底 + 普通字 +
  *     底部 2dp 主色细进度线（只表示看过一部分，不画绿边框、不用绿字）；
- *  4. 其它 = 普通样式（surfaceVariant 底 + 发丝线描边 + 常规字色）；
- *  5. 已缓存 / 缓存中 = 右上角小角标：缓存中显示白色百分比，已缓存显示白色「✓」。
+ *  4. 其它 = 普通样式（surfaceVariant 底 + 发丝线描边 + 常规字色）。
  *
- * 交互：单击播放；**长按** = 「缓存本集」（由调用方弹确认框）。
+ * 交互：单击播放。
  * 原来每格自带 padding(horizontal = Spacing.page)，导致横向空隙 28dp、纵向 0 → 现已删除，改由网格统一控制。
  */
 @Composable
 private fun EpisodeItem(
     video: VideoItemVo,
     currentVideoId: Long?,
-    onClick: () -> Unit,
-    fullCached: Boolean = false,
-    downloadPercent: Int? = null,
-    onLongPress: () -> Unit = {}
+    onClick: () -> Unit
 ) {
     val hc = hyperColors()
     val primary = MaterialTheme.colorScheme.primary
@@ -740,17 +606,7 @@ private fun EpisodeItem(
                 color = if (isCurrent) primary else hc.line,
                 shape = shape
             )
-            // TV：遥控器没有"长按"，改「OK = 播放 / MENU = 缓存本集」（§6.4）
-            // 焦点放大 + 描边由 tvClickable 统一负责（手机端的 detectTapGestures 在 D-pad 下完全不可达）
-            .tvClickable(shape = shape, focusedScale = 1.06f, onClick = onClick)
-            .onPreviewKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && e.isMenu()) {
-                    onLongPress()
-                    true
-                } else {
-                    false
-                }
-            },
+            .tvClickable(shape = shape, focusedScale = 1.06f, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -772,12 +628,6 @@ private fun EpisodeItem(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 4.dp)
             )
-        }
-        // 缓存角标：**深色小圆底 + 白字/白勾**（固定色）。
-        // 不能只用白字直接压在格底上：格底是 surfaceVariant，浅色主题下接近白色 → 白字会隐形。
-        when {
-            downloadPercent != null -> CacheBadge(text = "$downloadPercent%")
-            fullCached -> CacheBadge()
         }
         // 「看过一部分」专属：格底 2dp 细进度线（当前集 / 已看完都不画）
         if (partiallyWatched) {
@@ -801,276 +651,6 @@ private fun EpisodeItem(
                     }
                 }
             }
-        }
-    }
-}
-
-/**
- * 按压回弹 + 长按（集数格专用）：单击播放、长按缓存。
- *
- * 为什么不用 [bounceClick] 再另挂一个 pointerInput：两个 Modifier 各自独立处理指针，
- * 长按后松手会把单击也触发一遍（既缓存又跳转）。这里用 detectTapGestures 统一分发，
- * 长按与单击互斥，行为确定。
- */
-private fun Modifier.bounceLongClick(
-    pressedScale: Float = 0.92f,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit
-): Modifier = composed {
-    var pressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) pressedScale else 1f,
-        animationSpec = tween(durationMillis = Motion.FAST, easing = Motion.Ease),
-        label = "episodeBounceScale"
-    )
-    this
-        .scale(scale)
-        .pointerInput(Unit) {
-            detectTapGestures(
-                onPress = {
-                    pressed = true
-                    // 等抬手或手势被取消（长按后松手同样会返回），保证回弹一定复位
-                    tryAwaitRelease()
-                    pressed = false
-                },
-                onTap = { onClick() },
-                onLongPress = { onLongPress() }
-            )
-        }
-}
-
-/* =========================================================================
- * 选集缓存（底部面板 + 集数格 + 角标）
- * ========================================================================= */
-
-/** 面板里一集的可选状态：可勾选 / 下载中 / 已缓存 */
-private data class CacheCellState(
-    val cached: Boolean = false,
-    val percent: Int? = null
-) {
-    val selectable: Boolean get() = !cached && percent == null
-}
-
-/**
- * 选集缓存底部面板（对齐爱奇艺「缓存」选集）：
- *  - 顶部：季标题 + 全选/取消全选；
- *  - 中部：5 列集数网格（可勾选；已缓存/下载中的集显示状态且不可再选）；
- *  - 底部：已选数量 + 「缓存(N)」主按钮。
- *
- * 为什么做成底部面板而不是弹窗：一季动辄几十集，弹窗列表既放不下也不好看；
- * 底部面板能铺开网格、支持多选与全选，这是长视频 App 的标准做法。
- */
-@Composable
-private fun CacheSheet(
-    movieId: Long,
-    movieTitle: String,
-    seasonNo: Int,
-    episodes: List<VideoItemVo>,
-    cachedIds: Set<Long>,
-    downloadStates: Map<String, DownloadState>,
-    initialSelected: Set<Long>,
-    onDismiss: () -> Unit,
-    onConfirm: (List<VideoItemVo>) -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-
-    // 每集的缓存状态（可勾选 / 下载中 / 已缓存）——普通函数，不参与组合
-    fun stateOf(video: VideoItemVo): CacheCellState {
-        val download = downloadStates[MediaCacheManager.mediaIdOf(movieId, video.id)]
-        return when {
-            download?.isCompleted == true || cachedIds.contains(video.id) -> CacheCellState(cached = true)
-            download?.isActive == true -> CacheCellState(percent = download.percent.roundToInt())
-            else -> CacheCellState()
-        }
-    }
-
-    // 打开时按预选（长按某一格）初始化；已缓存/下载中的预选会被自动剔除
-    var selected by remember(episodes, initialSelected) {
-        mutableStateOf(
-            episodes.asSequence()
-                .filter { initialSelected.contains(it.id) && stateOf(it).selectable }
-                .map { it.id }
-                .toSet()
-        )
-    }
-    val selectableIds = remember(episodes, cachedIds, downloadStates) {
-        episodes.asSequence().filter { stateOf(it).selectable }.map { it.id }.toSet()
-    }
-    val allSelected = selectableIds.isNotEmpty() && selected.containsAll(selectableIds)
-
-    TvSidePanel(onDismissRequest = onDismiss) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "缓存 · 第${seasonNo}季",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = movieTitle,
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            HyperButton(
-                text = if (allSelected) "取消全选" else "全选",
-                onClick = { selected = if (allSelected) emptySet() else selectableIds },
-                style = HyperButtonStyle.Ghost,
-                small = true,
-                enabled = selectableIds.isNotEmpty()
-            )
-        }
-        Spacer(Modifier.height(Spacing.md))
-        // TV：面板整高（TvSidePanel 是右侧抽屉），网格直接吃剩余高度即可；
-        // 手机端"底部弹层 90% 屏高 + heightIn 双封顶"的那套约束在抽屉里不再需要。
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.cardGap),
-            verticalArrangement = Arrangement.spacedBy(Spacing.cardGap)
-        ) {
-            items(episodes, key = { it.id }) { video ->
-                CacheCell(
-                    video = video,
-                    selected = selected.contains(video.id),
-                    state = stateOf(video),
-                    onToggle = {
-                        selected = if (selected.contains(video.id)) {
-                            selected - video.id
-                        } else {
-                            selected + video.id
-                        }
-                    }
-                )
-            }
-        }
-        Spacer(Modifier.height(Spacing.md))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (selected.isEmpty()) "选择要缓存的剧集" else "已选 ${selected.size} 集",
-                fontSize = 18.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            HyperButton(
-                text = if (selected.isEmpty()) "缓存" else "缓存(${selected.size})",
-                onClick = { onConfirm(episodes.filter { selected.contains(it.id) }) },
-                enabled = selected.isNotEmpty()
-            )
-        }
-    }
-}
-
-/** 面板里的单个集数格（选中 = 品牌绿淡底 + 绿描边 + 右上角绿勾） */
-@Composable
-private fun CacheCell(
-    video: VideoItemVo,
-    selected: Boolean,
-    state: CacheCellState,
-    onToggle: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val hc = hyperColors()
-    val shape = RoundedCornerShape(10.dp)
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .clip(shape)
-            .background(
-                when {
-                    state.cached -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                    selected -> primary.copy(alpha = 0.14f)
-                    else -> MaterialTheme.colorScheme.surfaceVariant
-                }
-            )
-            .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) primary else hc.line,
-                shape = shape
-            )
-            .then(
-                if (state.selectable) Modifier.tvClickable(shape = shape, focusedScale = 1.06f, onClick = onToggle)
-                else Modifier
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "${video.episodeNo}",
-            fontSize = 20.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = when {
-                selected -> primary
-                state.cached -> hc.text3
-                else -> MaterialTheme.colorScheme.onSurface
-            }
-        )
-        when {
-            state.cached -> CacheBadge()
-            state.percent != null -> CacheBadge(text = "${state.percent}%")
-            selected -> Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(2.dp)
-                    .size(14.dp)
-                    .clip(CircleShape)
-                    .background(primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(10.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 集数格右上角的缓存角标：**深色小圆底 + 白字/白勾**（固定色，不随主题）。
- * 为什么必须加一层深色底：它压在格底（surfaceVariant）上，而格底在**浅色主题**下接近白色，
- * 纯白文字会直接隐形；固定深色圆底才能在深浅两种主题下都读得清。
- */
-@Composable
-private fun BoxScope.CacheBadge(text: String? = null) {
-    Box(
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(4.dp)
-            .size(24.dp)
-            .clip(CircleShape)
-            .background(Color(0xCC000000)),
-        contentAlignment = Alignment.Center
-    ) {
-        if (text != null) {
-            Text(
-                text = text,
-                fontSize = 12.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = "已缓存",
-                tint = Color.White,
-                modifier = Modifier.size(15.dp)
-            )
         }
     }
 }

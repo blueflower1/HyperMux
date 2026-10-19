@@ -61,7 +61,7 @@ object TvSize {
 
     /** 分类/搜索网格列数（1080p 基准；4K 由 BoxWithConstraints 放宽） */
     const val gridColumnsHd = 5
-    const val gridColumnsFhd = 6
+    const val gridColumnsFhd = 4   // 6→5→4：海报逐轮放大（用户反馈仍偏小）
     /** 详情页剧集网格列数 */
     const val episodeColumns = 9
 

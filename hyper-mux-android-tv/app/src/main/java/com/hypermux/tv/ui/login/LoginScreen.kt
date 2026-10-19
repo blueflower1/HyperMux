@@ -1,6 +1,8 @@
 package com.hypermux.tv.ui.login
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,12 +38,18 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import com.hypermux.tv.data.repo.ServerMode
 import com.hypermux.tv.ui.common.HyperButton
 import com.hypermux.tv.ui.common.HyperTextField
@@ -56,12 +66,14 @@ import com.hypermux.tv.ui.tv.tvClickable
 private enum class LoginField { USERNAME, PASSWORD }
 
 /**
- * 登录页（TV 版，48-tv-app-detailed.md §8.1）。
+ * 登录页（TV 版，48-tv-app-detailed.md §8.1 + 扫码登录）。
  *
- * 与手机端的差异：
- * 1. 左侧表单 + 右侧**自绘字符键盘**（双栏）：遥控器没有软键盘，逐字输入必须由自绘键盘承担；
- * 2. 检测到硬件键盘（蓝牙/USB）时自动隐藏自绘键盘，退回原生输入；
- * 3. 全部控件走焦点态（tvClickable / 输入框聚焦描边），进入页面即聚焦用户名框。
+ * 布局：**左二维码 / 中表单 / 右自绘键盘** 三段。
+ * 1. 左侧登录二维码：进入页面即向服务器申请一次性登录码（120s，过期自动重建），
+ *    手机 App「扫一扫」确认后本页自动完成登录（与密码登录同一条 saveSession 通路）；
+ * 2. 右侧表单 + **自绘字符键盘**：遥控器没有软键盘，逐字输入必须由自绘键盘承担；
+ *    检测到硬件键盘（蓝牙/USB）时自动隐藏自绘键盘，退回原生输入；
+ * 3. 全部控件走焦点态（tvClickable / 输入框聚焦描边），进入页面即聚焦用户名框；二维码区不抢焦点。
  *
  * 校验规则与手机端完全一致（铁律，见 §13.4）：用户名 3~32 位字母数字下划线；
  * **密码仅校验长度 6~20，不校验字符集**。
@@ -101,12 +113,13 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
                 .padding(horizontal = Spacing.page, vertical = 40.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ---------- 左：品牌 + 表单 ----------
+            // ---------- 左：品牌 + 登录二维码 + 状态文案 ----------
             Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.9f)
                     .fillMaxHeight(),
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -126,21 +139,34 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
                     Spacer(Modifier.width(Spacing.lg))
                     Column {
                         Text(
-                            text = "HyperMux",
+                            text = "HyperMux TV",
                             fontSize = TvType.hero,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "影视聚合播放 · TV 版",
+                            text = "影视聚合播放",
                             fontSize = TvType.meta,
                             color = hc.text3
                         )
                     }
                 }
 
-                Spacer(Modifier.height(Spacing.xxl))
+                Spacer(Modifier.height(Spacing.xl))
+                QrCard(vm)
+                Spacer(Modifier.height(Spacing.md))
+                QrStatusText(vm)
+            }
 
+            Spacer(Modifier.width(Spacing.xxl))
+
+            // ---------- 中：账号密码表单 ----------
+            Column(
+                modifier = Modifier
+                    .weight(1.1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center
+            ) {
                 HyperTextField(
                     value = vm.username,
                     onValueChange = vm::onUsernameChange,
@@ -221,6 +247,93 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
 
     if (vm.dialogOpen) {
         ServerConfigDialog(vm)
+    }
+}
+
+/**
+ * 登录二维码卡片：二维码必须**白底**绘制（TV 深色主题下扫码对比度不足）。
+ * 无码时按状态显示加载圈或二维码图标占位。
+ */
+@Composable
+private fun QrCard(vm: LoginViewModel) {
+    val hc = hyperColors()
+    val bitmap = rememberQrBitmap(vm.qrPayload)
+    Box(
+        modifier = Modifier
+            .size(300.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White)
+            .border(2.dp, hc.line, RoundedCornerShape(20.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        val bmp = bitmap
+        when {
+            bmp != null -> Image(
+                bitmap = bmp,
+                contentDescription = "TV 登录二维码",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp)
+            )
+            vm.qrState == QrState.LOADING -> CircularProgressIndicator(
+                modifier = Modifier.size(44.dp),
+                strokeWidth = 3.dp,
+                color = Color.DarkGray
+            )
+            else -> Icon(
+                Icons.Filled.QrCode2,
+                contentDescription = null,
+                tint = Color(0xFFDDDDDD),
+                modifier = Modifier.size(140.dp)
+            )
+        }
+    }
+}
+
+/** 二维码下方状态文案 */
+@Composable
+private fun QrStatusText(vm: LoginViewModel) {
+    val hc = hyperColors()
+    Text(
+        text = when (vm.qrState) {
+            QrState.IDLE -> "先配置服务器地址，二维码将自动生成"
+            QrState.LOADING -> "正在生成登录二维码…"
+            QrState.ACTIVE -> "用手机打开 HyperMux App → 扫一扫，登录 TV"
+            QrState.SCANNED -> "已扫码，请在手机上确认登录"
+            QrState.UNSUPPORTED -> "当前服务器不支持扫码登录，请用账号密码"
+            QrState.UNREACHABLE -> "连接不上服务器，二维码不可用"
+        },
+        fontSize = TvType.meta,
+        color = if (vm.qrState == QrState.SCANNED) MaterialTheme.colorScheme.primary else hc.text3,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+/** qrId 载荷 → 黑白位图（zxing 编码；每个 payload 只算一次，480px 足够手机扫清） */
+@Composable
+private fun rememberQrBitmap(payload: String?, sizePx: Int = 480): ImageBitmap? {
+    return remember(payload, sizePx) {
+        payload?.let { p ->
+            runCatching {
+                val matrix = QRCodeWriter().encode(
+                    p, BarcodeFormat.QR_CODE, sizePx, sizePx,
+                    mapOf(EncodeHintType.MARGIN to 2)
+                )
+                val pixels = IntArray(sizePx * sizePx)
+                for (y in 0 until sizePx) {
+                    val off = y * sizePx
+                    for (x in 0 until sizePx) {
+                        pixels[off + x] =
+                            if (matrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                    }
+                }
+                android.graphics.Bitmap
+                    .createBitmap(pixels, sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+                    .asImageBitmap()
+            }.getOrNull()
+        }
     }
 }
 

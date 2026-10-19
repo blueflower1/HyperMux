@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypermux.tv.config.AppConfig
 import com.hypermux.tv.data.api.ApiException
-import com.hypermux.tv.data.cache.MediaCacheManager
 import com.hypermux.tv.data.model.MovieDetailVo
 import com.hypermux.tv.data.model.PlayUrlVo
 import com.hypermux.tv.data.model.SeasonsVo
@@ -19,7 +18,6 @@ import com.hypermux.tv.data.repo.ProgressSync
 import com.hypermux.tv.data.repo.SettingsRepo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +27,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** 自动连播角标状态（§6.6） */
@@ -50,8 +47,7 @@ class PlayerViewModel @Inject constructor(
     private val state: SavedStateHandle,
     private val settingsRepo: SettingsRepo,
     private val pendingStore: PendingProgressStore,
-    private val progressSync: ProgressSync,
-    val cacheManager: MediaCacheManager
+    private val progressSync: ProgressSync
 ) : ViewModel() {
 
     val movieId: Long = state.get<Long>("movieId") ?: -1L
@@ -74,49 +70,6 @@ class PlayerViewModel @Inject constructor(
     fun setLastSpeed(v: Float) {
         viewModelScope.launch { settingsRepo.setLastSpeed(v) }
     }
-
-    // ---- 缓存状态（播放页「缓存」按钮 / 角标） ----
-
-    /** 全部下载项状态（按 mediaId 索引） */
-    val downloadStates: StateFlow<Map<String, com.hypermux.tv.data.cache.DownloadState>> =
-        cacheManager.states
-
-    /** 当前集已显式下载的字节数（`> 0` 时播放页可停止轮询、显示部分下载提示） */
-    fun cachedBytes(videoId: Long): Long =
-        cacheManager.cachedBytesOf(MediaCacheManager.cacheKeyOf(videoId))
-
-    /**
-     * 缓存当前集（播放页「缓存」按钮）。直链与请求头直接复用当前播放用的那一份，
-     * 因此不需要再换一次；片名/集名等元信息从已加载的详情与剧集里取（缓存中心分组展示用）。
-     */
-    fun cacheEpisode(
-        videoId: Long,
-        uri: String,
-        headers: Map<String, String>?
-    ) {
-        val v = findVideo(videoId)
-        runCatching {
-            cacheManager.enqueueDownload(
-                movieId = movieId,
-                videoId = videoId,
-                uri = uri,
-                headers = headers,
-                seasonNo = seasonNoOf(videoId),
-                episodeNo = v?.episodeNo ?: 1,
-                videoTitle = v?.title,
-                movieTitle = _movie.value?.title.orEmpty(),
-                coverUrl = _movie.value?.coverUrl
-            )
-        }.onFailure { Log.w(TAG, "enqueue download failed", it) }
-    }
-
-    private fun findVideo(videoId: Long): VideoItemVo? =
-        _seasons.value?.seasons?.flatMap { it.videos }?.firstOrNull { it.id == videoId }
-
-    private fun seasonNoOf(videoId: Long): Int =
-        _seasons.value?.seasons
-            ?.firstOrNull { s -> s.videos.any { it.id == videoId } }
-            ?.seasonNo ?: 1
 
     /** 当前播放目标（切集时更新 videoId） */
     private val _targetVideoId = MutableStateFlow(videoId)
@@ -205,21 +158,13 @@ class PlayerViewModel @Inject constructor(
         Result.failure(e)
     }
 
-    /** 换取播放直链（§6.2 链路第一步）。
-     *  **本地优先**：该集已完整显式下载时，直接下发本地缓存 URI
-     *  （[MediaCacheManager.cacheUriOf]），不请求直链接口 —— 断网也能播
-     *  （之前断网时这里先等直链超时，已下载的集根本播不了）；
-     *  在线时已下载的集也省一次换链请求，且数据源只读本地缓存不触网。 */
+    /** 换取播放直链（§6.2 链路第一步）。 */
     fun loadPlayUrl(videoId: Long) {
         _targetVideoId.value = videoId
         viewModelScope.launch {
             _isLoadingUrl.value = true
             _urlError.value = null
             try {
-                if (withContext(Dispatchers.IO) { cacheManager.isFullyCached(videoId) }) {
-                    _playUrl.value = PlayUrlVo(url = MediaCacheManager.cacheUriOf(videoId))
-                    return@launch
-                }
                 _playUrl.value = playbackRepo.playUrl(videoId)
             } catch (e: CancellationException) {
                 throw e

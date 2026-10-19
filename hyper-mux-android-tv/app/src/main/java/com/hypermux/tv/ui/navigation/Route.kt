@@ -7,13 +7,10 @@ object Route {
     const val Login = "login"
     const val Home = "home"
     const val Category = "category/{categoryId}"
-    const val Search = "search"
     const val Movie = "movie/{movieId}"
     const val Play = "play/{movieId}/{videoId}"
     const val History = "history"
     const val Me = "me"
-    const val Downloads = "downloads"
-    const val DownloadDetail = "downloads/{movieId}"
 
     /** 分类列表页；name 经查询参数透传（顶栏标题展示用，可空） */
     fun category(categoryId: Long, name: String? = null): String {
@@ -27,10 +24,4 @@ object Route {
 
     fun movie(movieId: Long) = "movie/$movieId"
     fun play(movieId: Long, videoId: Long) = "play/$movieId/$videoId"
-
-    /** 「我的下载」一级页（影片列表，入口在「我的」页） */
-    fun downloads() = Downloads
-
-    /** 「我的下载」二级页：单部影片的下载中/已下载集级列表 */
-    fun downloadDetail(movieId: Long) = "downloads/$movieId"
 }

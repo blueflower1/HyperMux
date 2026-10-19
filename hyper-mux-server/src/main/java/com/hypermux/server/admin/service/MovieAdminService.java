@@ -9,6 +9,7 @@ import com.hypermux.server.category.CategoryMapper;
 import com.hypermux.server.common.BizException;
 import com.hypermux.server.common.ErrorCode;
 import com.hypermux.server.common.PageResult;
+import com.hypermux.server.common.PinyinUtils;
 import com.hypermux.server.common.Ts;
 import com.hypermux.server.movie.MovieEntity;
 import com.hypermux.server.movie.MovieMapper;
@@ -68,7 +69,13 @@ public class MovieAdminService {
         LambdaQueryWrapper<MovieEntity> qw = new LambdaQueryWrapper<>();
         if (keyword != null && !keyword.isBlank()) {
             String k = keyword.trim();
-            qw.and(w -> w.like(MovieEntity::getTitle, k).or().like(MovieEntity::getOriginalTitle, k));
+            String pattern = "%" + k + "%";
+            String lowerPattern = "%" + k.toLowerCase(java.util.Locale.ROOT) + "%";
+            // 与 App 端搜索一致：汉字/原名 LIKE + 全拼/首字母拉丁检索
+            qw.and(w -> w.apply("title ILIKE {0}", pattern)
+                    .or().apply("original_title ILIKE {0}", pattern)
+                    .or().apply("title_pinyin ILIKE {0}", lowerPattern)
+                    .or().apply("title_initials ILIKE {0}", lowerPattern));
         }
         List<String> statuses = parseStatuses(status);
         qw.in(MovieEntity::getStatus, statuses);
@@ -192,6 +199,7 @@ public class MovieAdminService {
         entity.setStatus(MovieEntity.STATUS_PUBLISHED);
         entity.setSourceType(MovieEntity.SOURCE_MANUAL);
         applyMainFields(entity, body);
+        refreshPinyin(entity);
         movieMapper.insert(entity);
 
         List<VideoEntity> videos = buildVideos(entity.getId(), entity.getSourceId(), episodes, true);
@@ -224,6 +232,7 @@ public class MovieAdminService {
             entity.setCategoryId(body.categoryId());
         }
         applyMainFields(entity, body);
+        refreshPinyin(entity);
         movieMapper.updateById(entity);
         if (body.tagIds() != null) {
             replaceTags(id, body.tagIds());
@@ -266,6 +275,12 @@ public class MovieAdminService {
         if (body.sourcePath() != null) {
             entity.setSourcePath(body.sourcePath());
         }
+    }
+
+    /** 重算拼音检索列（title_pinyin / title_initials），新建与更新都要保证与 title 同步。 */
+    private void refreshPinyin(MovieEntity entity) {
+        entity.setTitlePinyin(PinyinUtils.fullPinyin(entity.getTitle()));
+        entity.setTitleInitials(PinyinUtils.initials(entity.getTitle()));
     }
 
     private List<VideoEntity> buildVideos(Long movieId, Long movieSourceId, List<AdminVos.EpisodeBody> episodes,

@@ -37,15 +37,12 @@ import androidx.navigation.navArgument
 import com.hypermux.tv.data.update.UpdateDownloadState
 import com.hypermux.tv.ui.AuthViewModel
 import com.hypermux.tv.ui.category.CategoryScreen
-import com.hypermux.tv.ui.downloads.DownloadDetailScreen
-import com.hypermux.tv.ui.downloads.MyDownloadsScreen
 import com.hypermux.tv.ui.history.HistoryScreen
 import com.hypermux.tv.ui.home.HomeScreen
 import com.hypermux.tv.ui.login.LoginScreen
 import com.hypermux.tv.ui.me.MeScreen
 import com.hypermux.tv.ui.movie.MovieDetailScreen
 import com.hypermux.tv.ui.player.PlayerScreen
-import com.hypermux.tv.ui.search.SearchScreen
 import com.hypermux.tv.ui.theme.Motion
 import com.hypermux.tv.ui.tv.TvMessageOverlay
 import com.hypermux.tv.ui.tv.TvNavRail
@@ -57,7 +54,7 @@ import kotlinx.coroutines.delay
 /* ============================ 页面转场（TV 版） ============================
  * TV 的转场要**克制**：大屏 + 遥控器，位移大了会晃眼、还会让焦点落点看起来"漂移"。
  *  - 一级页（首页 / 历史 / 我的）：纯淡入淡出（左侧导航栏常驻，不参与转场）；
- *  - 二级页（分类 / 搜索 / 详情 / 下载）：整屏自右滑入 + 淡入（"推入"语义，与手机端一致）；
+ *  - 二级页（分类 / 详情 / 下载）：整屏自右滑入 + 淡入（"推入"语义，与手机端一致）；
  *  - 播放页：快速淡入（全屏黑底，滑动位移没有意义）。
  * 时长统一走 Motion.*。
  */
@@ -130,8 +127,7 @@ fun AppNavigation() {
         if (shouldShowNavRail(currentRoute)) {
             TvNavRail(
                 currentRoute = currentRoute,
-                onNavigate = { navController.navigateTab(it) },
-                onSearch = { navController.navigateSearch() }
+                onNavigate = { navController.navigateTab(it) }
             )
         }
         // focusRestorer：二级页返回后，焦点回到来源元素（§6.1 焦点恢复）
@@ -207,19 +203,6 @@ fun AppNavigation() {
                     }
                 }
 
-                // ---- 全局搜索（二级页） ----
-                composable(
-                    Route.Search,
-                    enterTransition = PageEnterTransition,
-                    exitTransition = PageExitTransition,
-                    popEnterTransition = PagePopEnterTransition,
-                    popExitTransition = PagePopExitTransition
-                ) {
-                    RequireSession(session, navController) {
-                        SearchScreen(navController = navController)
-                    }
-                }
-
                 // ---- 影片详情（二级页） ----
                 composable(
                     Route.Movie,
@@ -276,33 +259,6 @@ fun AppNavigation() {
                             onOpenMovie = { id -> navController.navigateMovie(id) },
                             onPlay = { mid, vid -> navController.navigatePlay(mid, vid) }
                         )
-                    }
-                }
-
-                // ---- 我的下载（一级页：影片列表，二级页：单片集级管理） ----
-                composable(
-                    Route.Downloads,
-                    enterTransition = PageEnterTransition,
-                    exitTransition = PageExitTransition,
-                    popEnterTransition = PagePopEnterTransition,
-                    popExitTransition = PagePopExitTransition
-                ) {
-                    RequireSession(session, navController) {
-                        MyDownloadsScreen(navController = navController)
-                    }
-                }
-
-                composable(
-                    Route.DownloadDetail,
-                    arguments = listOf(navArgument("movieId") { type = NavType.LongType }),
-                    enterTransition = PageEnterTransition,
-                    exitTransition = PageExitTransition,
-                    popEnterTransition = PagePopEnterTransition,
-                    popExitTransition = PagePopExitTransition
-                ) {
-                    // movieId 由 DownloadDetailViewModel 从导航参数（SavedStateHandle）读取
-                    RequireSession(session, navController) {
-                        DownloadDetailScreen(navController = navController)
                     }
                 }
 

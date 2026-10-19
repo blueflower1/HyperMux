@@ -91,6 +91,12 @@
             <artifactId>commons-io</artifactId>
             <version>2.16.1</version>
         </dependency>
+        <!-- 片名拼音/首字母检索（TV 遥控器键盘只能打拉丁字母） -->
+        <dependency>
+            <groupId>com.belerweb</groupId>
+            <artifactId>pinyin4j</artifactId>
+            <version>2.5.1</version>
+        </dependency>
 
         <dependency>
             <groupId>org.projectlombok</groupId>

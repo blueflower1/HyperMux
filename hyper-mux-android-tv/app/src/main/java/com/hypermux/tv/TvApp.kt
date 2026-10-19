@@ -11,7 +11,6 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.util.Logger
-import com.hypermux.tv.data.cache.MediaCacheManager
 import com.hypermux.tv.data.repo.AuthRepo
 import com.hypermux.tv.data.repo.PendingProgressStore
 import com.hypermux.tv.data.repo.ProgressSync
@@ -51,9 +50,6 @@ class TvApp : Application() {
     @Inject
     lateinit var pendingProgressStore: PendingProgressStore
 
-    @Inject
-    lateinit var cacheManager: MediaCacheManager
-
     override fun onCreate() {
         super.onCreate()
         installImageLoader()
@@ -62,9 +58,6 @@ class TvApp : Application() {
             authRepo.preload()
             settingsRepo.preload()
             pendingProgressStore.preload()
-            // 恢复「仅 Wi-Fi 下载」到 DownloadManager：
-            // 进程重启后运行条件会回到默认的 NETWORK，若不重放，用户的"仅 Wi-Fi"设置会失效。
-            runCatching { cacheManager.setWifiOnly(settingsRepo.wifiOnlyDownload.first()) }
         }
         // 离线断点补报的两个触发点：App 启动 + 网络「离线→在线」（见 ProgressSync）
         progressSync.start()

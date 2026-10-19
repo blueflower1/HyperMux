@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +64,6 @@ import com.hypermux.tv.ui.common.HyperIconButton
 import com.hypermux.tv.ui.common.HyperSwitch
 import com.hypermux.tv.ui.common.OfflineBanner
 import com.hypermux.tv.ui.common.formatBytes
-import com.hypermux.tv.ui.navigation.navigateDownloads
 import com.hypermux.tv.ui.theme.Spacing
 import com.hypermux.tv.ui.theme.TvType
 import com.hypermux.tv.ui.theme.hyperColors
@@ -103,8 +101,6 @@ fun MeScreen(navController: NavController) {
     val isOffline by networkVm.isOffline.collectAsStateWithLifecycle()
     val longPressSpeed by settingsVm.longPressSpeed.collectAsStateWithLifecycle()
     val rememberSpeed by settingsVm.rememberSpeed.collectAsStateWithLifecycle()
-    val cacheStats by settingsVm.cacheStats.collectAsStateWithLifecycle()
-    val wifiOnly by settingsVm.wifiOnlyDownload.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // 更新状态必须与 AppNavigation 层的弹窗读同一实例：导航目的地里的默认 hiltViewModel()
     // 会解析到 NavBackStackEntry 作用域（每屏一份），故这里显式取 Activity 作用域
@@ -122,9 +118,6 @@ fun MeScreen(navController: NavController) {
     var message by remember { mutableStateOf<String?>(null) }
 
     val firstRowRequester = remember { FocusRequester() }
-
-    // 进页面重算一次缓存占用（DownloadManager 的索引在别处可能已变化）
-    LaunchedEffect(Unit) { settingsVm.refreshCacheStats() }
 
     // 手动检查结果（启动被动检查不打扰，不走到这里）
     LaunchedEffect(updateManual) {
@@ -179,35 +172,6 @@ fun MeScreen(navController: NavController) {
                             trailing = { HyperSwitch(checked = rememberSpeed) }
                         )
                         HintRow("（播放中按住遥控器 MENU 键临时加速，松手恢复原速）")
-                    }
-                }
-            }
-
-            // 显式下载：占用统计 + 进入「我的下载」页 + 仅 Wi-Fi 开关
-            item(key = "cache") {
-                Section(title = "缓存") {
-                    HyperCard(modifier = Modifier.fillMaxWidth()) {
-                        InfoRow(
-                            label = "我的下载",
-                            value = "${cacheStats.movieCount} 部 · ${formatBytes(cacheStats.bytes)}",
-                            onClick = { navController.navigateDownloads() },
-                            showDivider = true,
-                            trailing = {
-                                Icon(
-                                    imageVector = Icons.Filled.ChevronRight,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        )
-                        InfoRow(
-                            label = "仅 Wi-Fi 下载",
-                            value = if (wifiOnly) "开" else "关",
-                            onClick = { settingsVm.setWifiOnlyDownload(!wifiOnly) },
-                            showDivider = false,
-                            trailing = { HyperSwitch(checked = wifiOnly) }
-                        )
                     }
                 }
             }
@@ -292,7 +256,7 @@ fun MeScreen(navController: NavController) {
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        text = "HyperMux Android TV ${BuildConfig.VERSION_NAME} · 与手机端 / Web 端共用同一套内容",
+                        text = "HyperMux TV ${BuildConfig.VERSION_NAME} · 与手机端 / Web 端共用同一套内容",
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier

@@ -144,7 +144,6 @@ dependencies {
     implementation(libs.androidx.media3.ui.compose)
     // 播放缓存 / 离线下载：cache-first 数据源 + 下载索引数据库（版本对齐 1.7.1，不升级）
     implementation(libs.androidx.media3.datasource)
-    implementation(libs.androidx.media3.database)
 
     // 第 4 层解码兜底：FFmpeg 软解扩展（含全部 ABI 的原生库，体积换兼容性）
     // TV 盒子 HEVC/10bit/DTS 硬解缺失比手机更常见，必须保留
@@ -152,6 +151,7 @@ dependencies {
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
+    implementation(libs.zxing.core)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 

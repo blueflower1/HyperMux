@@ -13,6 +13,9 @@
     <!-- App 自更新：经 FileProvider 把已校验的安装包交给系统安装器（normal 级；
          用户首次安装时系统弹「安装未知应用」授权，被拒则先跳设置页，见 UpdateViewModel.installNow） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 扫一扫登录 TV 端：仅 ScanScreen 运行时申请（首次进入弹系统授权），非扫码功能不触发 -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <!-- debug 允许明文 http（自托管测试环境）；release 在 build.gradle 关闭（usesCleartextTraffic 默认 false） -->
     <application

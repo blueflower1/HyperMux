@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,7 +38,8 @@ import com.hypermux.tv.ui.theme.hyperColors
 
 /**
  * 左侧导航栏（48-tv-app-detailed.md §7.1）：
- * 手机端的**底部 Tab（首页/历史/我的）+ 顶栏搜索**，在 TV 上合并为左侧竖排导航。
+ * 手机端的**底部 Tab（首页/历史/我的）**，在 TV 上合并为左侧竖排导航；
+ * 搜索已并入首页（首页 chip 行「搜索」胶囊 → 页内搜索模式），不再占导航项。
  *
  * 焦点规则（§6.2）：
  *  - 导航项之间 `UP/DOWN` 移动；
@@ -50,7 +50,6 @@ import com.hypermux.tv.ui.theme.hyperColors
 fun TvNavRail(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    onSearch: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null
 ) {
@@ -85,13 +84,7 @@ fun TvNavRail(
             selected = currentRoute == Route.Me,
             onClick = { onNavigate(Route.Me) }
         )
-        // 搜索在手机端是顶栏胶囊；TV 上作为导航项（点开是二级页）
-        RailItem(
-            label = "搜索",
-            icon = Icons.Filled.Search,
-            selected = currentRoute == Route.Search,
-            onClick = onSearch
-        )
+        // 搜索已并入首页（chip 行「搜索」胶囊 → 页内搜索模式），不再占导航项
 
         Spacer(Modifier.weight(1f))
         Text(
@@ -123,7 +116,7 @@ private fun BrandHeader() {
         }
         Spacer(Modifier.width(Spacing.md))
         Text(
-            text = "HyperMux",
+            text = "HyperMux TV",
             color = MaterialTheme.colorScheme.onSurface,
             fontSize = TvType.cardTitle,
             fontWeight = FontWeight.ExtraBold

@@ -78,8 +78,15 @@ public class MovieQueryService {
         int p = Math.max(page, 1);
         int s = Math.min(Math.max(size, 1), MAX_SIZE);
         if (keyword != null && !keyword.isBlank()) {
-            String pattern = "%" + keyword.trim() + "%";
-            qw.and(w -> w.apply("title ILIKE {0}", pattern).or().apply("original_title ILIKE {0}", pattern));
+            String kw = keyword.trim();
+            String pattern = "%" + kw + "%";
+            // 拼音列存的是小写，关键词同步转小写再匹配
+            String lowerPattern = "%" + kw.toLowerCase(java.util.Locale.ROOT) + "%";
+            // 汉字/原名直接 LIKE；全拼与首字母支持拉丁字母检索（glgs → 灌篮高手）
+            qw.and(w -> w.apply("title ILIKE {0}", pattern)
+                    .or().apply("original_title ILIKE {0}", pattern)
+                    .or().apply("title_pinyin ILIKE {0}", lowerPattern)
+                    .or().apply("title_initials ILIKE {0}", lowerPattern));
         }
         qw.orderByAsc(MovieEntity::getSortNo).orderByAsc(MovieEntity::getId);
         Page<MovieEntity> result = movieMapper.selectPage(new Page<>(p, s), qw);

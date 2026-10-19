@@ -13,6 +13,8 @@ import com.hypermux.tv.data.model.PlayUrlReq
 import com.hypermux.tv.data.model.PlayUrlVo
 import com.hypermux.tv.data.model.ProgressReq
 import com.hypermux.tv.data.model.ProgressVo
+import com.hypermux.tv.data.model.QrCreateVo
+import com.hypermux.tv.data.model.QrStatusVo
 import com.hypermux.tv.data.model.SeasonsVo
 import com.hypermux.tv.data.model.SessionVo
 import com.hypermux.tv.data.model.UpdateInfo
@@ -36,6 +38,12 @@ interface ApiService {
 
     @POST("api/app/auth/login")
     suspend fun login(@Body req: LoginReq): ApiResponse<SessionVo>
+
+    @POST("api/app/auth/qr/create")
+    suspend fun qrCreate(): ApiResponse<QrCreateVo>
+
+    @GET("api/app/auth/qr/status")
+    suspend fun qrStatus(@Query("id") id: String): ApiResponse<QrStatusVo>
 
     @GET("api/app/home")
     suspend fun home(): ApiResponse<HomeVo>

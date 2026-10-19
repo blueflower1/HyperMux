@@ -44,6 +44,12 @@ public class MovieEntity {
 
     private String intro;
 
+    /** 检索辅助：片名全拼（小写无分隔，服务层维护，见 PinyinUtils） */
+    private String titlePinyin;
+
+    /** 检索辅助：片名首字母（小写，如 灌篮高手 → glgs） */
+    private String titleInitials;
+
     /** 冗余：非 missing 剧集数（服务层维护） */
     private Integer episodeTotal;
 

@@ -29,8 +29,8 @@ android {
         applicationId = "com.hypermux.mobile"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.1.12"
+        versionCode = 14
+        versionName = "0.1.13"
 
         // 留空 = 首次启动引导填写；可用 -PhypermuxApiBase=http://host:port 在构建期预置
         buildConfigField("String", "API_BASE", "\"${(rootProject.findProperty("hypermuxApiBase") ?: "")}\"")
@@ -147,6 +147,11 @@ dependencies {
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
+    implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 

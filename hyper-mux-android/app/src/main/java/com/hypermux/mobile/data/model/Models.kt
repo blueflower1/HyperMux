@@ -13,6 +13,9 @@ data class ApiResponse<T>(
 
 data class LoginReq(val username: String, val password: String)
 
+/** 扫码登录：qr/scan 与 qr/confirm 请求体（id = TV 登录码） */
+data class QrIdReq(val id: String)
+
 data class SessionUserVo(
     val id: Long,
     val username: String,

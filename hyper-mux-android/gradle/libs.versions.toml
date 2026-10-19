@@ -23,6 +23,9 @@ retrofit = "2.11.0"
 okhttp = "4.12.0"
 coil = "3.1.0"
 coroutines = "1.9.0"
+# 扫一扫登录：zxing 解码 + CameraX 取流（TV 端登录二维码由手机扫）
+zxing = "3.5.3"
+camerax = "1.3.4"
 
 junit = "4.13.2"
 
@@ -58,6 +61,11 @@ nextlib-media3ext = { group = "io.github.anilbeesetti", name = "nextlib-media3ex
 
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }

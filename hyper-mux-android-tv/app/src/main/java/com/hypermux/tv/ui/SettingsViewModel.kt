@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hypermux.tv.config.AppConfig
-import com.hypermux.tv.data.cache.CacheStats
-import com.hypermux.tv.data.cache.MediaCacheManager
 import com.hypermux.tv.data.repo.AuthRepo
 import com.hypermux.tv.data.repo.ServerMode
 import com.hypermux.tv.data.repo.SettingsRepo
@@ -19,13 +17,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** 设置页动作：主题 / 播放偏好 / 媒体缓存 / 封面缓存 / 登出（服务器地址只读展示，修改走登录页「服务器配置」） */
+/** 设置页动作：主题 / 播放偏好 / 封面缓存 / 登出（服务器地址只读展示，修改走登录页「服务器配置」） */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepo: SettingsRepo,
-    private val authRepo: AuthRepo,
-    private val cacheManager: MediaCacheManager
+    private val authRepo: AuthRepo
 ) : ViewModel() {
 
     val themeMode: StateFlow<ThemeMode> = settingsRepo.themeMode
@@ -52,29 +49,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setRememberSpeed(v: Boolean) {
         viewModelScope.launch { settingsRepo.setRememberSpeed(v) }
-    }
-
-    // ---- 显式下载（「我的下载」页 / 我的页共用） ----
-
-    val cacheStats: StateFlow<CacheStats> = cacheManager.stats
-
-    /** 仅 Wi-Fi 下载（缓存中心 / 我的页共用） */
-    val wifiOnlyDownload: StateFlow<Boolean> = settingsRepo.wifiOnlyDownload
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
-    fun setWifiOnlyDownload(v: Boolean) {
-        viewModelScope.launch { settingsRepo.setWifiOnlyDownload(v) }
-        // 立刻作用到 DownloadManager（蜂窝下正在跑的下载会被系统暂停，回到 Wi-Fi 自动继续）
-        cacheManager.setWifiOnly(v)
-    }
-
-    /** 重算缓存占用/已完成集数（进入「我的」页时调用） */
-    fun refreshCacheStats() {
-        cacheManager.syncState()
-    }
-
-    fun clearAllCache() {
-        cacheManager.clearAll()
     }
 
     fun setThemeMode(mode: ThemeMode) {

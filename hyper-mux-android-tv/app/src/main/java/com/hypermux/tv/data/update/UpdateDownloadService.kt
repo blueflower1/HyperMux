@@ -32,7 +32,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * 更新包下载服务（前台服务，模式对齐 [com.hypermux.tv.data.cache.HyperDownloadService]）：
+ * 更新包下载服务（前台服务 + 进度通知）：
  * - 前台运行 + 系统通知展示进度：切后台 / 锁屏不被回收，避免"下载悄悄停住"；
  * - 边下边算 SHA-256（流式），校验通过才把临时文件改名为最终包，坏包不留盘；
  * - 复用 App 的 OkHttp：占位 host 由 ServerUrlInterceptor 重写为用户配置的服务器，

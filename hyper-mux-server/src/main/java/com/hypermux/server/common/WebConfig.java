@@ -32,6 +32,8 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/app/**", "/api/admin/**")
                 .excludePathPatterns("/api/app/auth/login", "/api/admin/auth/login",
+                        // 扫码登录：TV 创建登录码与轮询状态是匿名端点（scan/confirm 需手机端 token，不豁免）
+                        "/api/app/auth/qr/create", "/api/app/auth/qr/status",
                         // 应用自更新：未登录也要能检查/下载（契约 §3.11）
                         "/api/app/update/check", "/api/app/update/download");
     }

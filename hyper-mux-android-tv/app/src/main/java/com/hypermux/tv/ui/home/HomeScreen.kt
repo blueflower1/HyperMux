@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,11 +24,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +72,7 @@ import com.hypermux.tv.ui.common.CoverImage
 import com.hypermux.tv.ui.common.EmptyView
 import com.hypermux.tv.ui.common.ErrorState
 import com.hypermux.tv.ui.common.HyperButton
+import com.hypermux.tv.ui.common.HyperButtonStyle
 import com.hypermux.tv.ui.common.HyperChip
 import com.hypermux.tv.ui.common.MovieCardItem
 import com.hypermux.tv.ui.common.OfflineBanner
@@ -73,6 +81,7 @@ import com.hypermux.tv.ui.common.progressPct
 import com.hypermux.tv.ui.common.ratingText
 import com.hypermux.tv.ui.common.remainText
 import com.hypermux.tv.ui.navigation.navigateHistory
+import com.hypermux.tv.ui.search.SearchViewModel
 import com.hypermux.tv.ui.theme.Motion
 import com.hypermux.tv.ui.theme.Spacing
 import com.hypermux.tv.ui.theme.TvSize
@@ -80,6 +89,7 @@ import com.hypermux.tv.ui.theme.TvType
 import com.hypermux.tv.ui.theme.hyperColors
 import com.hypermux.tv.ui.tv.TvAutoFocus
 import com.hypermux.tv.ui.tv.TvSectionHeader
+import com.hypermux.tv.ui.tv.TvTextInputPanel
 import com.hypermux.tv.ui.tv.tvClickable
 import kotlinx.coroutines.delay
 
@@ -89,15 +99,16 @@ import kotlinx.coroutines.delay
  * 与手机端的结构差异（一层映射）：
  * | 手机端 | TV 端 |
  * | --- | --- |
- * | 顶栏搜索胶囊 + 历史图标 | 左侧导航栏的「搜索」「历史」项（本页不再有顶栏） |
+ * | 顶栏搜索胶囊 + 历史图标 | **搜索并入首页**：chip 行「搜索」胶囊 → 页内搜索模式（不再跳独立搜索页） |
  * | 频道 Tab 行 | 频道 **chip 行**（TvLazyRow，焦点态放大 + 描边） |
  * | 16:9 轮播 + 圆点分页 | **Hero 大图**（自动轮播，不可手动翻页；焦点只落在「查看详情」） |
  * | 金色「继续观看」横幅 | 「继续观看」rail（宽卡，420dp） |
  * | 分区标题 + **双列信息流网格** | 分区标题 + **横向 rail**（TvLazyRow，卡片 240dp 横版剧照） |
- * | 具体分类 Tab：双列网格 | 具体分类 Tab：**6 列网格**（LazyVerticalGrid，焦点滚动由 LazyLayout 自带） |
+ * | 具体分类 Tab：双列网格 | 具体分类 Tab：**4 列网格**（LazyVerticalGrid，焦点滚动由 LazyLayout 自带） |
  *
  * 焦点（§6.2）：进入页面 → Hero 的「查看详情」；UP/DOWN 走 rail 之间，LEFT/RIGHT 走 rail 内，
  * 从最左侧卡片 LEFT 回导航栏。返回本页时按 [rememberSaveable] 记住的卡片恢复焦点。
+ * 搜索模式：BACK 先退出搜索（不清 App），再按才维持「首页 BACK 忽略」约定。
  */
 @Composable
 fun HomeScreen(
@@ -107,6 +118,7 @@ fun HomeScreen(
     onPlay: (movieId: Long, videoId: Long) -> Unit
 ) {
     val vm: HomeViewModel = hiltViewModel()
+    val searchVm: SearchViewModel = hiltViewModel()
     val networkVm: NetworkViewModel = hiltViewModel()
 
     val home by vm.home.collectAsStateWithLifecycle(initialValue = null)
@@ -118,8 +130,19 @@ fun HomeScreen(
     val sections by vm.sections.collectAsStateWithLifecycle(initialValue = emptyList())
     val isOffline by networkVm.isOffline.collectAsStateWithLifecycle()
 
-    // 首页 BACK 忽略（§7.3：TV 上退出 App 用遥控器 HOME 键，不用 BACK）
-    BackHandler { /* 有意为之：什么都不做 */ }
+    // ---- 页内搜索模式（原独立搜索页并入首页） ----
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var inputOpen by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    val searchQuery by searchVm.query.collectAsStateWithLifecycle(initialValue = "")
+
+    fun exitSearch() {
+        searchOpen = false
+        searchVm.onQueryChange("")   // 清空查询与结果，回到普通首页
+    }
+
+    // 首页 BACK：搜索模式先退出搜索；否则忽略（§7.3：TV 上退出 App 用遥控器 HOME 键，不用 BACK）
+    BackHandler { if (searchOpen) exitSearch() }
 
     LaunchedEffect(Unit) { vm.loadHome() }
 
@@ -142,11 +165,12 @@ fun HomeScreen(
     val focusMap = remember { mutableMapOf<String, FocusRequester>() }
     val heroRequester = remember { FocusRequester() }
     val retryRequester = remember { FocusRequester() }
+    val searchBarRequester = remember { FocusRequester() }
 
     val gridState = rememberLazyGridState()
-    // 具体分类 Tab 的触底加载（首页 Tab 不需要：分区数据一次返回）
-    LaunchedEffect(gridState, isHomeTab) {
-        if (isHomeTab) return@LaunchedEffect
+    // 具体分类 Tab 的触底加载（首页 Tab 不需要：分区数据一次返回；搜索模式由 SearchArea 自己翻页）
+    LaunchedEffect(gridState, isHomeTab, searchOpen) {
+        if (isHomeTab || searchOpen) return@LaunchedEffect
         snapshotFlow { gridState.layoutInfo }
             .collect { info ->
                 val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -155,15 +179,34 @@ fun HomeScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // ---- 顶部搜索框：点击即进入搜索模式并弹出键盘（搜索并入首页，无独立搜索页/搜索按钮） ----
+        HomeSearchBar(
+            searching = searchOpen,
+            query = searchQuery,
+            focusRequester = searchBarRequester,
+            onClick = {
+                searchOpen = true
+                draft = searchQuery
+                inputOpen = true
+            },
+            onExit = { exitSearch() }
+        )
+
         // 频道 chip 行（手机端是文字 Tab，TV 改成可聚焦 chip：焦点态更明确）
         ChannelChips(
             tabs = tabs,
             selectedId = currentTab,
-            onSelect = { vm.selectCategory(it) }
+            onSelect = { vm.selectCategory(it); searchOpen = false }
         )
 
         Box(modifier = Modifier.weight(1f)) {
             when {
+                searchOpen -> SearchArea(
+                    vm = searchVm,
+                    gridState = gridState,
+                    onOpenMovie = onOpenMovie
+                )
+
                 isLoading && home == null -> SkeletonPosterGrid(rows = 3, columns = 5)
 
                 home == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -269,7 +312,7 @@ fun HomeScreen(
                 }
 
                 else -> {
-                    // ---- 具体分类 Tab：6 列网格 ----
+                    // ---- 具体分类 Tab：4 列网格 ----
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(TvSize.gridColumnsFhd),
                         state = gridState,
@@ -336,10 +379,29 @@ fun HomeScreen(
         }
     }
 
-    // 数据就绪 → 恢复焦点：优先回到上次聚焦的卡片，否则给 Hero 的「查看详情」
-    val ready = home != null || !isLoading
+    // 数据就绪 → 恢复焦点：优先回到上次聚焦的卡片，否则给 Hero 的「查看详情」；
+    // 搜索模式焦点落在顶部搜索框（键盘关闭后自动回到搜索框）
+    val ready = (home != null || !isLoading) && !searchOpen
     val restoreRequester = lastKey?.let { focusMap[it] } ?: heroRequester
-    TvAutoFocus(restoreRequester, ready = ready)
+    if (searchOpen) TvAutoFocus(searchBarRequester, ready = !inputOpen)
+    else TvAutoFocus(restoreRequester, ready = ready)
+
+    // 搜索输入弹层（自绘字符键盘，遥控器唯一可用的打字方式）
+    if (inputOpen) {
+        TvTextInputPanel(
+            title = "搜索片名 / 演员",
+            value = draft,
+            onValueChange = { draft = it },
+            onConfirm = {
+                inputOpen = false
+                val kw = draft.trim()
+                if (kw.isNotBlank()) searchVm.onSubmitKeyword(kw)
+                // 空提交：保持搜索区（显示搜索历史）
+            },
+            onDismiss = { inputOpen = false },
+            placeholder = "片名 / 演员（支持拼音 / 首字母）"
+        )
+    }
 }
 
 /** 同一个 key 只创建一个 FocusRequester（避免重复 key 的卡片共享 requester 导致焦点歧义） */
@@ -361,7 +423,7 @@ private fun ChannelChips(
     TvLazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = Spacing.lg, bottom = Spacing.sm),
+            .padding(top = Spacing.xs, bottom = Spacing.sm),
         contentPadding = PaddingValues(horizontal = Spacing.page),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
@@ -598,6 +660,229 @@ private fun ContinueWatchingRailCard(
                             .height(5.dp)
                             .clip(RoundedCornerShape(50))
                             .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 页内搜索区（顶部搜索框进入搜索模式后的内容区）：
+ *  - 未输入 → 搜索历史 chips（FlowRow，最多 10 条）；
+ *  - 已输入 → 结果网格 **4 列** + 触底翻页（复用首页 gridState，同一时刻只有一个网格）。
+ * 搜索框本体在页面顶部（HomeSearchBar），退出/重新输入都在那里操作。
+ */
+@Composable
+private fun SearchArea(
+    vm: SearchViewModel,
+    gridState: LazyGridState,
+    onOpenMovie: (Long) -> Unit
+) {
+    val query by vm.query.collectAsStateWithLifecycle(initialValue = "")
+    val results by vm.results.collectAsStateWithLifecycle(initialValue = emptyList())
+    val isSearching by vm.isSearching.collectAsStateWithLifecycle(initialValue = false)
+    val isLoadingMore by vm.isLoadingMore.collectAsStateWithLifecycle(initialValue = false)
+    val error by vm.error.collectAsStateWithLifecycle(initialValue = null)
+    val history by vm.searchHistory.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val retryRequester = remember { FocusRequester() }
+    val focusMap = remember { mutableMapOf<Long, FocusRequester>() }
+
+    // 结果网格触底翻页
+    LaunchedEffect(gridState, query) {
+        if (query.isBlank()) return@LaunchedEffect
+        snapshotFlow { gridState.layoutInfo }
+            .collect { info ->
+                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                if (lastVisible >= info.totalItemsCount - 4) vm.loadMore()
+            }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                query.isBlank() -> SearchHistoryArea(
+                    history = history,
+                    onPick = { kw -> vm.onSubmitKeyword(kw) },
+                    onClear = { vm.clearHistory() }
+                )
+
+                isSearching && results.isEmpty() -> Box(
+                    Modifier.fillMaxSize().padding(horizontal = Spacing.page),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    SkeletonPosterGrid(rows = 3, columns = TvSize.gridColumnsFhd)
+                }
+
+                error != null && results.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ErrorState(message = error!!, onRetry = { vm.retry() }, focusRequester = retryRequester)
+                    TvAutoFocus(retryRequester)
+                }
+
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(TvSize.gridColumnsFhd),
+                    state = gridState,
+                    contentPadding = PaddingValues(
+                        start = Spacing.page,
+                        end = Spacing.page,
+                        top = Spacing.sm,
+                        bottom = Spacing.xxl
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.cardGap),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.railGap),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(items = results, key = { it.id }) { card ->
+                        val r = focusMap.getOrPut(card.id) { FocusRequester() }
+                        MovieCardItem(
+                            card = card,
+                            forcePortrait = true,
+                            onClick = {
+                                vm.onResultClick(card)
+                                onOpenMovie(card.id)
+                            },
+                            modifier = Modifier.focusRequester(r)
+                        )
+                    }
+
+                    if (results.isEmpty() && error == null && !isSearching) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            EmptyView(
+                                text = "没有找到「$query」相关影片",
+                                sub = "换个关键词试试"
+                            )
+                        }
+                    }
+
+                    if (isLoadingMore) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                Modifier.fillMaxWidth().padding(Spacing.lg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+}
+
+/**
+ * 首页顶部搜索框：常态是带放大镜的占位胶囊；点击进入搜索模式并弹出自绘键盘。
+ * 搜索模式下显示当前关键词与「重新输入」引导，右侧出现「退出搜索」。
+ */
+@Composable
+private fun HomeSearchBar(
+    searching: Boolean,
+    query: String,
+    focusRequester: FocusRequester,
+    onClick: () -> Unit,
+    onExit: () -> Unit
+) {
+    val hc = hyperColors()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.page)
+            .padding(top = Spacing.lg, bottom = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                .focusRequester(focusRequester)
+                .tvClickable(shape = RoundedCornerShape(50), focusedScale = 1.02f, onClick = onClick)
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = hc.text3,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(Spacing.md))
+            Text(
+                text = when {
+                    !searching -> "搜索片名 / 演员"
+                    query.isBlank() -> "输入片名 / 演员开始搜索"
+                    else -> "「$query」的搜索结果"
+                },
+                fontSize = TvType.body,
+                color = if (searching && query.isNotBlank()) MaterialTheme.colorScheme.onSurface else hc.text3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (searching) {
+                Text(
+                    text = if (query.isBlank()) "输入" else "重新输入",
+                    fontSize = TvType.meta,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        if (searching) {
+            Spacer(Modifier.width(Spacing.md))
+            HyperButton(
+                text = "退出搜索",
+                onClick = onExit,
+                style = HyperButtonStyle.Ghost
+            )
+        }
+    }
+}
+
+/**
+ * 搜索历史（页内搜索区空查询时展示）：chips 可换行（FlowRow），最多 10 条；
+ * 按 OK 直接以该词搜索；「清空」清全部历史。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SearchHistoryArea(
+    history: List<String>,
+    onPick: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Spacing.page, vertical = Spacing.lg)
+    ) {
+        TvSectionHeader(
+            title = "搜索历史",
+            onMore = if (history.isNotEmpty()) onClear else null,
+            moreLabel = "清空"
+        )
+        Spacer(Modifier.height(Spacing.lg))
+        if (history.isEmpty()) {
+            EmptyView(
+                text = "暂无搜索历史",
+                sub = "点上方「输入」开始搜索",
+                icon = Icons.Filled.History
+            )
+        } else {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                history.take(10).forEach { kw ->
+                    HyperChip(
+                        text = kw,
+                        verticalPadding = 10.dp,
+                        onClick = { onPick(kw) }
                     )
                 }
             }

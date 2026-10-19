@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -71,6 +72,7 @@ import com.hypermux.mobile.ui.common.bounceClick
 import com.hypermux.mobile.ui.common.formatBytes
 import com.hypermux.mobile.ui.navigation.BottomNavBar
 import com.hypermux.mobile.ui.navigation.navigateDownloads
+import com.hypermux.mobile.ui.navigation.navigateScan
 import com.hypermux.mobile.ui.theme.Motion
 import com.hypermux.mobile.ui.layout.LocalLayoutProfile
 import com.hypermux.mobile.ui.layout.cappedFill
@@ -164,6 +166,26 @@ fun MeScreen(navController: NavController) {
                 verticalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
                 session?.let { user -> UserCard(user) }
+
+                // 扫一扫登录 TV 端（与 TV 登录页二维码配对；本页必然已登录，天然满足前置条件）
+                Section(title = "常用") {
+                    HyperCard(modifier = Modifier.fillMaxWidth()) {
+                        InfoRow(
+                            label = "扫一扫",
+                            value = "登录 HyperMux TV",
+                            onClick = { navController.navigateScan() },
+                            showDivider = false,
+                            trailing = {
+                                androidx.compose.material3.Icon(
+                                    imageVector = Icons.Filled.QrCodeScanner,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        )
+                    }
+                }
 
                 Section(title = "外观") {
                     ThemeSelector(

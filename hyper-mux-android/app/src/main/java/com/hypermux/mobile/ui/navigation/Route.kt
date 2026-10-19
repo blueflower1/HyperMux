@@ -12,6 +12,7 @@ object Route {
     const val Play = "play/{movieId}/{videoId}"
     const val History = "history"
     const val Me = "me"
+    const val Scan = "scan"
     const val Downloads = "downloads"
     const val DownloadDetail = "downloads/{movieId}"
 

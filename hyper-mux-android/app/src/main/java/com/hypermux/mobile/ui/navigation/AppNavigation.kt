@@ -43,6 +43,7 @@ import com.hypermux.mobile.ui.category.CategoryScreen
 import com.hypermux.mobile.ui.downloads.DownloadDetailScreen
 import com.hypermux.mobile.ui.downloads.MyDownloadsScreen
 import com.hypermux.mobile.ui.search.SearchScreen
+import com.hypermux.mobile.ui.scan.ScanScreen
 import com.hypermux.mobile.ui.movie.MovieDetailScreen
 import com.hypermux.mobile.ui.player.PlayerScreen
 import com.hypermux.mobile.ui.theme.Motion
@@ -352,6 +353,19 @@ fun AppNavigation() {
             // movieId 由 DownloadDetailViewModel 从导航参数（SavedStateHandle）读取
             RequireSession(session, navController) {
                 DownloadDetailScreen(navController = navController)
+            }
+        }
+
+        // ---- 扫一扫（二级页：扫 TV 登录二维码） ----
+        composable(
+            Route.Scan,
+            enterTransition = PageEnterTransition,
+            exitTransition = PageExitTransition,
+            popEnterTransition = PagePopEnterTransition,
+            popExitTransition = PagePopExitTransition
+        ) {
+            RequireSession(session, navController) {
+                ScanScreen(navController = navController)
             }
         }
 

@@ -126,3 +126,6 @@ CREATE TABLE IF NOT EXISTS app_release (
 
 -- ===== rebuild additions (idempotent) =====
 ALTER TABLE movie ADD COLUMN IF NOT EXISTS backdrop_url text;
+-- 拼音检索列（TV 遥控器只能打拉丁字母：全拼/首字母子串匹配），存量回填见 SchemaMigrateRunner
+ALTER TABLE movie ADD COLUMN IF NOT EXISTS title_pinyin varchar(512);
+ALTER TABLE movie ADD COLUMN IF NOT EXISTS title_initials varchar(128);

@@ -44,13 +44,6 @@
             </intent-filter>
         </activity>
 
-        <!-- 离线下载服务（Media3 DownloadService）：前台服务运行，后台持续下载当前队列。
-             通知内容见 HyperDownloadService.getForegroundNotification；基类以 dataSync 类型拉起。 -->
-        <service
-            android:name=".data.cache.HyperDownloadService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync"/>
-
         <!-- 更新包下载服务（前台服务 + 进度通知，见 UpdateDownloadService） -->
         <service
             android:name=".data.update.UpdateDownloadService"

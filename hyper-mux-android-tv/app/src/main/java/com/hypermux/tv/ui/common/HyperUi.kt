@@ -64,9 +64,11 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -277,9 +279,19 @@ private fun HyperTextFieldCore(
     textStyle: TextStyle,
 ) {
     val hc = hyperColors()
+    // CharKeypad 是在字符串末尾追加字符，但 TextField 的光标由它自己维护、外部改值不会跟着走，
+    // 结果就是「文字追加对了、光标却停在开头」。这里用 TextFieldValue 托管：外部 value 变化时
+    // 同步并把光标放到末尾；value == 内部 text（实体键盘自然编辑）时不干预光标。
+    val tfValue = remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    if (tfValue.value.text != value) {
+        tfValue.value = TextFieldValue(value, TextRange(value.length))
+    }
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = tfValue.value,
+        onValueChange = {
+            tfValue.value = it
+            onValueChange(it.text)
+        },
         modifier = modifier.heightIn(min = 64.dp),
         enabled = enabled,
         isError = isError,

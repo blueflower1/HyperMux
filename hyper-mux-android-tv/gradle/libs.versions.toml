@@ -28,6 +28,8 @@ retrofit = "2.11.0"
 okhttp = "4.12.0"
 coil = "3.1.0"
 coroutines = "1.9.0"
+# 扫码登录：TV 端只做二维码编码（手机端负责解码），core 足够
+zxing = "3.5.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -52,10 +54,9 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-media3-ui-compose = { group = "androidx.media3", name = "media3-ui-compose", version.ref = "media3" }
-# 缓存层显式声明（media3-exoplayer 只是**传递**依赖它们；显式声明才能保证编译期可见 SimpleCache/
-# CacheDataSource/StandaloneDatabaseProvider 等 API 不被上游 POM 的依赖作用域变化打断）。版本必须与 media3 严格一致。
+# 缓存层显式声明（media3-exoplayer 只是**传递**依赖它；显式声明才能保证编译期可见
+# DefaultDataSourceFactory/DefaultHttpDataSource 等 API 不被上游 POM 的依赖作用域变化打断）。版本必须与 media3 严格一致。
 androidx-media3-datasource = { group = "androidx.media3", name = "media3-datasource", version.ref = "media3" }
-androidx-media3-database = { group = "androidx.media3", name = "media3-database", version.ref = "media3" }
 
 # 第 4 层解码兜底：FFmpeg 软解（覆盖 ExoPlayer/系统都没有解码器的编码，如老设备上的 AV1、DTS/TrueHD 音轨）。
 # AAR 自带 arm64-v8a / armeabi-v7a / x86 / x86_64 四套 libavcodec 等 .so，无需额外 jniLibs 配置。
@@ -63,6 +64,7 @@ nextlib-media3ext = { group = "io.github.anilbeesetti", name = "nextlib-media3ex
 
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
