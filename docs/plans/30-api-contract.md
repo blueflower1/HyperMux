@@ -26,7 +26,7 @@
 | 大小 | 字节数（`size` 字段），展示单位由前端换算 |
 | 评分 | `rating`：`number`，0~10 一位小数（`3.5`/`null`） |
 
-**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；`/api/app/**` 要 TV 用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。
+**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；`/api/app/**` 要普通用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。
 
 ---
 

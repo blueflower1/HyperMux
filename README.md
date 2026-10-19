@@ -4,7 +4,7 @@
 影片数据源对接 [OpenList](https://openlistteam.github.io/)（只作为视频直链来源，后端不中转视频流）。
 
 > 规划与详细设计见 [PLAN.md](./PLAN.md) 与 [docs/plans/](./docs/plans)（10 数据模型 / 20 后端 / 30 接口契约 / 40 TV App / 45 手机 App / 50 管理后台 / 60 刮削 / 70 部署运维）。
-> **📖 使用教程（含全站截图与 OpenList 接入指引）：[docs/使用教程.html](./docs/使用教程.html)**（自包含单文件，可离线打开）。
+> **📖 使用教程（部署 → 数据源 → 上架影片 → 三端观看）：[docs/使用教程.md](./docs/使用教程.md)**。
 
 ## 目录结构（monorepo）
 

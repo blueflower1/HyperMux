@@ -1,6 +1,7 @@
 # HyperMux TV · 整体开发计划（总纲）
 
 > **版本**：v0.7 · **状态**：v3（2026-10-11）取消「影片池」，改为「影视类型」（category，可自定义；movie.category_id 归属）；v2 起 OpenList 收敛为数据源 + 新建影片导入 + 按片名元数据刮削（TMDB/豆瓣），全量刮削/候选审核已移除。M0 ✅、M1 ✅、M3 ✅、M2 TV App 暂缓（约定不写）、**M2P 手机端计划书就绪（2026-10-11，本轮实施目标）**。
+> **2026-10-19 现状更新**：M2 TV App 已交付（`hyper-mux-android-tv/`，0.1.0）；M2P 手机 App 已交付（`hyper-mux-android/`，0.1.12）；`hyper-mux-web/` Web 播放端已交付；角色显示名「TV 用户」→「普通用户」（role=0，手机/TV/Web 多端通用）；两端 App 的公开服务器地址改为构建期注入（`-PhypermuxPublicServerUrl`，未注入则用户自填）。当前状态与构建命令以 [README.md](./README.md) 为准，本文档保留为规划总纲。
 > **定位**：本文档是全局总纲，只定"结构、边界、关键决策、节奏"。各模块的字段级契约、页面、解析规则等**详细设计在 docs/plans/ 中展开**（见 §11）。
 > **已锁定**（2026-10-09/11）：Naive UI ✅ · 用户名+密码登录 ✅ · 元数据刮削改为**按片名即时刮削并回填表单**（TMDB/豆瓣可切换）✅ · OpenList 公网直连（无中转）+ 仅作数据源 ✅
 
@@ -140,7 +141,7 @@ sequenceDiagram
 
 | 表 | 职责 | 关键字段（示意） |
 |---|---|---|
-| `sys_user` | TV 端用户 + 管理员（role 区分：0 TV 用户 / 1 管理员） | `username`、`password_hash`(BCrypt)、`nick_name`、`role`、`status`、`last_login_time` |
+| `sys_user` | 普通用户 + 管理员（role 区分：0 普通用户（手机/TV/Web 多端通用） / 1 管理员） | `username`、`password_hash`(BCrypt)、`nick_name`、`role`、`status`、`last_login_time` |
 | `category` | **影视类型**：TV 首页的分区（电视剧/电影/综艺…，可自定义） | `name`、`cover_url`、`description`、`sort_no`、`status` |
 | `movie` | **影片（作品）**：归属一个影视类型，手动或导入产生 | `category_id`、`title`、`original_title`、`year`、`cover_url`、`rating`(decimal)、`area`、`language`、`intro`、`episode_total`、`status`(DRAFT/PUBLISHED/OFF)、`source_type`(MANUAL/SCRAPE)、`source_id`、`source_path`、`sort_no` |
 | `tag` / `movie_tag` | 标签体系（类型/地区/自定义）与影片多对多 | `name`、`type`；中间表 `movie_id`+`tag_id` |

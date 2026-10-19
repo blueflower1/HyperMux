@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS sys_user (
   last_login_time timestamptz,
   create_time     timestamptz NOT NULL DEFAULT now(),
   update_time     timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT uk_sys_user_username UNIQUE (username)   -- 全局唯一（TV 用户与管理员共池）
+  CONSTRAINT uk_sys_user_username UNIQUE (username)   -- 全局唯一（普通用户与管理员共池）
 );
 
 -- ============ 影片池 ============
