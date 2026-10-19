@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 承载主题：无 ActionBar；深色窗口背景避免启动白闪（TV 端锁定深色，见 48 计划 §15 D6）。
+         windowNoTitle + 全屏：TV 无状态栏/导航栏遮挡需求，安全区由 Compose 层 48dp 内边距保证。 -->
+    <style name="Theme.HyperMux" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0F1012</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

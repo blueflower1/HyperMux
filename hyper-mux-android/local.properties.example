@@ -1,0 +1,7 @@
+# 本机 Android SDK 路径（Android Studio 自动写入；命令行构建时需要）
+sdk.dir=D\:\\dev_home\\android-sdk
+
+# 可选：覆盖默认服务器地址（留空则首次启动引导填写）
+# hypermuxApiBase=http://192.168.31.100:8080
+# 可选：内置「公开服务器」档位（构建期注入，留空则登录页必须自填地址）
+# hypermuxPublicServerUrl=http://your-server:8080

@@ -1,0 +1,21 @@
+# JetBrains Kotlin & Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+.gradle/
+build/
+/local.properties
+/app/local.properties
+
+# Keystore (never commit)
+*.jks
+*.keystore
+/keystore.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/

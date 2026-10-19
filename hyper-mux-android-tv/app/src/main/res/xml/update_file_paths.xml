@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 更新包 FileProvider 路径：仅暴露 filesDir/updates/ 下已校验通过的 apk（见 UpdateDownloadService） -->
+<paths>
+    <files-path
+        name="update-apks"
+        path="updates/"/>
+</paths>

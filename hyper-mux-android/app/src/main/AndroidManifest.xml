@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- 前台服务：下载期间 HyperDownloadService 以前台服务运行（右上角系统通知展示进度），
+         切后台/锁屏不被杀，避免"下载悄悄停住"。dataSync 类型需 S+ 单独权限。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- 播放页右半屏上下滑调音量：AudioManager.setStreamVolume 官方要求该权限（normal 级，安装即授予、无运行时弹窗）。
+         缺失时部分系统/ROM 直接抛 SecurityException —— 实测表现为"右滑调音量闪退"。 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- App 自更新：经 FileProvider 把已校验的安装包交给系统安装器（normal 级；
+         用户首次安装时系统弹「安装未知应用」授权，被拒则先跳设置页，见 UpdateViewModel.installNow） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
+    <!-- debug 允许明文 http（自托管测试环境）；release 在 build.gradle 关闭（usesCleartextTraffic 默认 false） -->
+    <application
+        android:name=".HyperMuxApp"
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HyperMux"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+
+        <!-- configChanges 必须含 screenLayout|density|uiMode：分屏 / 桌面窗口（freeform）切换会触发
+             screenLayout 与 density 配置变更，未声明就会重建 Activity —— 播放页的
+             DisposableEffect { controller.release() } 会随之把播放器整个释放，表现为「拖动窗口播放重启」。
+             uiMode 同理（系统深色模式切换）。TV 端 manifest 早已带这三项，手机端补齐。 -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- 离线下载服务（Media3 DownloadService）：前台服务运行，后台持续下载当前队列。
+             通知内容见 HyperDownloadService.getForegroundNotification；基类以 dataSync 类型拉起。 -->
+        <service
+            android:name=".data.cache.HyperDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <!-- 更新包下载服务（前台服务 + 进度通知，见 UpdateDownloadService） -->
+        <service
+            android:name=".data.update.UpdateDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <!-- 更新包安装：只暴露 files/updates/ 下的校验通过的 apk 给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths"/>
+        </provider>
+    </application>
+
+</manifest>

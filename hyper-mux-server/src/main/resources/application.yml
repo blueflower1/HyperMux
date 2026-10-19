@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: hypermux-server
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    url: jdbc:postgresql://${PG_HOST:127.0.0.1}:${PG_PORT:5432}/${PG_DB:hypermux}
+    username: ${PG_USER:hypermux}
+    password: ${PG_PASSWORD:hypermux}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+  web:
+    resources:
+      cache:
+        period: 0
+  servlet:
+    multipart:
+      # 管理端上传 APK（release 包约 27MB，留足余量）
+      max-file-size: 300MB
+      max-request-size: 320MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+management:
+  server:
+    port: ${MGMT_PORT:9090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+hypermux:
+  # 图片本地缓存（/img?u= 端点）：把远程图床（豆瓣/TMDB）图片下载到本机后由本站提供
+  image:
+    dir: ${HYPERMUX_IMAGE_DIR:${user.home}/.hypermux/images}
+    max-bytes: 12582912
+    allow-hosts:
+      - doubanio.com
+      - douban.com
+      - image.tmdb.org
+      - tmdb.org
+      - themoviedb.org
+  jwt:
+    secret: ${JWT_SECRET:dev-secret-change-me-please-0123456789}
+    app-ttl: 7d
+    admin-ttl: 12h
+  crypto:
+    token-key: ${HYPERMUX_SECRET:dev-crypto-secret-change-me-please-012345}
+  migrate:
+    enabled: ${HYPERMUX_AUTO_MIGRATE:true}
+    admin-bootstrap-username: admin
+    admin-bootstrap-password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+  openlist:
+    connect-timeout-ms: 5000
+    read-timeout-ms: 30000
+    retries: 1
+    page-size: 100
+  apk:
+    # 应用自更新 APK 存放目录（每个平台一个 {platform}-latest.apk，管理端上传覆盖）
+    dir: ${HYPERMUX_APK_DIR:${user.home}/.hypermux/apks}
+  metadata:
+    connect-timeout-ms: 5000
+    read-timeout-ms: 15000
+  static-dirs: ${HYPERMUX_STATIC_DIRS:}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TV Launcher 横幅（banner）：320×180 @ xhdpi。使用矢量自适应，避免多套位图。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <!-- 品牌深色底 -->
+    <path
+        android:fillColor="#0F1012"
+        android:pathData="M0,0 L320,0 L320,180 L0,180 Z"/>
+    <!-- 品牌绿渐变块（左 → 右） -->
+    <path
+        android:fillColor="#00BE06"
+        android:pathData="M0,0 L160,0 L96,180 L0,180 Z"/>
+    <path
+        android:fillColor="#37D67A"
+        android:pathData="M160,0 L320,0 L320,180 L96,180 Z"/>
+    <!-- 播放三角（居中，深色） -->
+    <path
+        android:fillColor="#0F1012"
+        android:pathData="M132,58 L188,90 L132,122 Z"/>
+</vector>

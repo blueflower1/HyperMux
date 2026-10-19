@@ -1,0 +1,531 @@
+/* ===================== HyperMux Admin 设计系统 =====================
+   圆角卡片 · 柔和阴影 · 缓动动画 · 橙色品牌 (#f5820d) + 深海军蓝侧栏
+=================================================================== */
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --hm-primary: #f5820d;
+  --hm-primary-soft: rgba(245, 130, 13, 0.1);
+  --hm-primary-grad: linear-gradient(135deg, #f7a325 0%, #f5720d 100%);
+  --hm-ink: #1c2434;
+  --hm-ink-2: #5c6675;
+  --hm-ink-3: #98a1b0;
+  --hm-bg: #f3f5f9;
+  --hm-line: #e8ecf3;
+  --hm-card: #ffffff;
+  --hm-radius: 14px;
+  --hm-shadow: 0 1px 2px rgba(23, 32, 51, 0.04), 0 6px 20px -8px rgba(23, 32, 51, 0.08);
+  --hm-shadow-lift: 0 4px 10px rgba(23, 32, 51, 0.05), 0 16px 34px -12px rgba(23, 32, 51, 0.16);
+  --hm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: var(--hm-ink);
+  background: var(--hm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(245, 130, 13, 0.22);
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccd4e0;
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b4bfce;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+.n-layout-scroll-container::-webkit-scrollbar-thumb,
+.n-scrollbar-container::-webkit-scrollbar-thumb {
+  background: #c3ccda;
+}
+
+/* ---------- 动画基础 ---------- */
+@keyframes hm-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes hm-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes hm-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes hm-float-a {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(40px, -30px) scale(1.12);
+  }
+  100% {
+    transform: translate(-24px, 24px) scale(0.96);
+  }
+}
+@keyframes hm-float-b {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-46px, 28px) scale(1.08);
+  }
+  100% {
+    transform: translate(30px, -20px) scale(1);
+  }
+}
+
+/* 路由切换：新页面挂载时播放淡入上移（不用 Vue Transition，见 RouterView 处注释） */
+.hm-page-enter {
+  animation: hm-fade-up 0.3s var(--hm-ease);
+}
+
+/* 网格子项交错入场 */
+.hm-stagger > * {
+  animation: hm-fade-up 0.4s var(--hm-ease) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+/* ---------- 卡片 ---------- */
+.hm-card {
+  background: var(--hm-card);
+  border-radius: var(--hm-radius);
+  border: 1px solid var(--hm-line);
+  box-shadow: var(--hm-shadow);
+}
+.hm-card--lift {
+  transition: transform 0.18s var(--hm-ease), box-shadow 0.18s var(--hm-ease);
+}
+.hm-card--lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--hm-shadow-lift);
+}
+
+/* ---------- 页头 ---------- */
+.hm-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.hm-page-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hm-page-title::before {
+  content: '';
+  width: 5px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--hm-primary-grad);
+}
+.hm-page-sub {
+  margin-top: 6px;
+  color: var(--hm-ink-3);
+  font-size: 13px;
+}
+
+/* ---------- 图标圆片 ---------- */
+.hm-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex: none;
+}
+.hm-chip svg {
+  width: 20px;
+  height: 20px;
+}
+.hm-chip--orange {
+  background: linear-gradient(135deg, rgba(247, 163, 37, 0.16), rgba(245, 114, 13, 0.16));
+  color: #ef7c0a;
+}
+.hm-chip--blue {
+  background: linear-gradient(135deg, rgba(47, 111, 237, 0.14), rgba(64, 128, 255, 0.14));
+  color: #2f6fed;
+}
+.hm-chip--green {
+  background: linear-gradient(135deg, rgba(24, 160, 88, 0.14), rgba(32, 178, 108, 0.14));
+  color: #18a058;
+}
+.hm-chip--purple {
+  background: linear-gradient(135deg, rgba(111, 70, 237, 0.13), rgba(136, 94, 255, 0.13));
+  color: #6f46ed;
+}
+
+/* ---------- 分段选择（状态 tab） ---------- */
+.hm-seg {
+  display: inline-flex;
+  gap: 2px;
+  background: #eef1f6;
+  border-radius: 11px;
+  padding: 3px;
+}
+.hm-seg button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--hm-ink-2);
+  font-size: 13px;
+  line-height: 1;
+  transition: color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.hm-seg button:hover {
+  color: var(--hm-primary);
+}
+.hm-seg button:active {
+  transform: scale(0.96);
+}
+.hm-seg button.active {
+  background: #fff;
+  color: var(--hm-primary);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(23, 32, 51, 0.12);
+}
+
+/* ---------- 杂项 ---------- */
+.dim {
+  color: var(--hm-ink-3);
+}
+.mono {
+  font-family: Consolas, Menlo, Monaco, monospace;
+  font-size: 12.5px;
+}
+
+/* 原生密码输入框（naive-ui 裁剪版无 NInputPassword） */
+.pwd-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  border: 1px solid var(--hm-line);
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+  background: #fff;
+  color: var(--hm-ink);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.pwd-input:focus {
+  border-color: var(--hm-primary);
+  box-shadow: 0 0 0 3px rgba(245, 130, 13, 0.12);
+}
+
+.hint {
+  color: var(--hm-ink-3);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* 结果提示块（连接测试等） */
+.hm-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  animation: hm-fade-up 0.25s var(--hm-ease);
+}
+.hm-result--ok {
+  background: rgba(24, 160, 88, 0.08);
+  color: #148f4e;
+  border: 1px solid rgba(24, 160, 88, 0.18);
+}
+.hm-result--err {
+  background: rgba(208, 48, 80, 0.06);
+  color: #c22a4b;
+  border: 1px solid rgba(208, 48, 80, 0.16);
+}
+
+/* ===================== naive-ui 全局微调 ===================== */
+
+/* 卡片 */
+.n-card {
+  border-radius: var(--hm-radius) !important;
+  box-shadow: var(--hm-shadow);
+  border-color: var(--hm-line) !important;
+}
+.n-card > .n-card__header {
+  font-weight: 600;
+}
+
+/* 按钮：加一点弹性 */
+.n-button {
+  transition: transform 0.1s ease, box-shadow 0.16s ease, background-color 0.16s ease, color 0.16s ease,
+    border-color 0.16s ease !important;
+}
+.n-button--primary-type:not(.n-button--disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -6px rgba(245, 114, 13, 0.5);
+}
+.n-button:active:not(.n-button--disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+/* 输入类：聚焦橙色光圈 */
+.n-input .n-input__border,
+.n-input:not(.n-input--disabled):hover .n-input__state-border {
+  border-radius: 10px;
+}
+.n-select .n-base-selection,
+.n-input-number {
+  border-radius: 10px !important;
+}
+.n-base-selection,
+.n-input-wrapper,
+.n-input-number__input,
+.n-base-selection-input {
+  border-radius: 10px;
+}
+
+/* 表格 */
+.n-data-table {
+  font-size: 13.5px;
+}
+.n-data-table-th {
+  font-weight: 600;
+  color: var(--hm-ink-2) !important;
+  background: #f8fafc !important;
+}
+.n-data-table-tr {
+  transition: background-color 0.12s ease;
+}
+.n-data-table .n-data-table-td {
+  transition: background-color 0.12s ease;
+}
+
+/* 分页 / 标签 */
+.n-pagination .n-pagination__button {
+  border-radius: 9px;
+}
+.n-tag {
+  transition: transform 0.12s ease;
+}
+
+/* 弹窗 / 气泡：大圆角 */
+.n-card.n-card--modal {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+.n-card.n-card--modal > .n-card__header .n-card-header__main {
+  font-weight: 700;
+}
+.n-popover,
+.n-popconfirm,
+.n-dropdown-menu {
+  border-radius: 12px !important;
+}
+.n-popover .n-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 通知消息：圆角大一点 */
+.n-message {
+  border-radius: 12px !important;
+}
+
+/* Switch 圆角胶囊 */
+.n-switch .n-switch__rail {
+  border-radius: 99px;
+}
+
+/* Tabs 下划线主题色增强 */
+.n-tabs .n-tabs-bar .n-tabs-tab--active {
+  font-weight: 600;
+}
+
+/* 空状态文字 */
+.n-empty .n-empty__description {
+  color: var(--hm-ink-3);
+}
+
+/* ===================== 页面统一规范（所有后台页面） =====================
+   统一：内容宽度 / 卡片圆角与内边距 / 区块标题 / 工具栏 / 表格 / 表单 / 底部留白
+   作用域限定在内容区（.content），不影响弹窗与侧栏。
+======================================================================= */
+
+/* 1) 内容容器：铺满可用宽度（不设最大宽度），统一底部留白 */
+.content .page {
+  width: 100%;
+  max-width: none;
+  padding-bottom: 48px;
+}
+/* 单卡片列表页（无 .page 容器时）同样铺满 */
+.content > .n-card {
+  width: 100%;
+  max-width: none;
+}
+
+/* 2) 卡片：统一 16px 圆角 + 内边距节奏 */
+.content .n-card {
+  width: 100%;
+  border-radius: 16px !important;
+  border-color: var(--hm-line) !important;
+  box-shadow: var(--hm-shadow);
+  overflow: hidden;
+}
+.content .n-card > .n-card-header,
+.content .n-card > .n-card__header {
+  padding: 14px 18px 10px;
+  font-weight: 700;
+}
+.content .n-card > .n-card__content {
+  padding: 14px 18px 18px;
+}
+/* 列表页：卡片头与表格贴合（去掉双层留白） */
+.content .n-card > .n-card__content:has(> .n-data-table) {
+  padding: 0 0 6px;
+}
+
+/* 3) 区块（页内分节）：与卡片同款 */
+.content .hm-section {
+  background: #fff;
+  border: 1px solid var(--hm-line);
+  border-radius: 16px;
+  box-shadow: var(--hm-shadow);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.content .hm-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hm-line);
+  background: linear-gradient(180deg, #fcfdff, #fff);
+}
+.content .hm-section-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.content .hm-section-body {
+  padding: 14px 18px 18px;
+}
+
+/* 4) 区块标题竖条（橙色渐变，全站统一） */
+.hm-bar {
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--hm-primary-grad);
+  flex: none;
+  display: inline-block;
+}
+
+/* 5) 工具栏（搜索 + 筛选 + 操作按钮） */
+.content .hm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.content .hm-toolbar .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 6) 表格：统一表头与行高 */
+.content .n-data-table {
+  border-radius: 12px;
+  font-size: 13.5px;
+}
+.content .n-data-table .n-data-table-th {
+  background: #f8fafc !important;
+  font-weight: 600;
+  color: var(--hm-ink-2) !important;
+}
+.content .n-data-table .n-data-table-td {
+  padding: 10px 12px;
+}
+.content .n-data-table .n-data-table-tr:hover .n-data-table-td {
+  background: #fafcff;
+}
+
+/* 7) 表单：统一标签字重与行距 */
+.content .n-form-item .n-form-item-label {
+  font-weight: 600;
+  color: #3c4657;
+}
+.content .n-form-item {
+  margin-bottom: 4px;
+}
+
+/* 8) 按钮统一圆角（含 small/tiny） */
+.content .n-button {
+  border-radius: 10px;
+}
+.content .n-button.n-button--tiny-type,
+.content .n-button.n-button--small-type {
+  border-radius: 9px;
+}
+
+/* 9) 描述列表 / 分页统一 */
+.content .n-descriptions {
+  font-size: 13px;
+}
+.content .n-pagination {
+  padding: 10px 4px 2px;
+}
+
+/* 10) 顶部页头（各页统一用法） */
+.content .hm-page-head {
+  margin-bottom: 16px;
+}
+.content .hm-page-sub {
+  max-width: 900px;
+  line-height: 1.6;
+}

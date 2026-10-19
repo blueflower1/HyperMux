@@ -1,0 +1,20 @@
+# 本地开发配置模板：复制为 application-dev.yml 并按本机情况修改（application-dev.yml 已在 .gitignore，勿提交真实凭据）
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/hypermux
+    username: postgres
+    password: "your-db-password"
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+hypermux:
+  # 后台前端构建产物目录（hyper-mux-admin 执行 npm run build:dist 输出到 ../admin-dist）
+  # 同源提供：http://<host>:8080/ ；静态文件每次请求读盘，重新 build 后刷新即生效
+  static-dirs: "../admin-dist"
+  migrate:
+    # 仅当库内无管理员时自举创建 admin；上线后务必修改密码并清空此项
+    admin-bootstrap-password: "Admin@1234"

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- 前台服务：下载期间 HyperDownloadService 以前台服务运行（右上角系统通知展示进度），
+         切后台不被杀，避免"下载悄悄停住"。dataSync 类型需 S+ 单独权限。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- App 自更新：经 FileProvider 把已校验的安装包交给系统安装器（normal 级；
+         用户首次安装时系统弹「安装未知应用」授权，被拒则先跳设置页，见 UpdateViewModel.installNow） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 注意：不需要 MODIFY_AUDIO_SETTINGS —— TV 端删除了音量滑动手势，
+         音量交由遥控器/系统控制（见 48-tv-app-detailed.md §9.5）。 -->
+
+    <!-- TV 端声明 leanback 但 required=false：兼容未认证盒子（Fire TV / 普通 Android 盒子侧装）与开发机。
+         同时不再要求触摸屏（遥控器为主，兼容蓝牙/USB 键盘）。 -->
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+
+    <!-- debug 允许明文 http（自托管测试环境）；release 在 build.gradle 关闭 -->
+    <application
+        android:name=".TvApp"
+        android:allowBackup="true"
+        android:banner="@drawable/tv_banner"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HyperMux"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+
+        <!-- TV：永久横屏；configChanges 覆盖键盘/导航/尺寸，避免蓝牙键盘接入时重建 Activity -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <!-- 同时声明 LAUNCHER 与 LEANBACK_LAUNCHER：TV 主屏与普通 Launcher 都能显示 -->
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- 离线下载服务（Media3 DownloadService）：前台服务运行，后台持续下载当前队列。
+             通知内容见 HyperDownloadService.getForegroundNotification；基类以 dataSync 类型拉起。 -->
+        <service
+            android:name=".data.cache.HyperDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <!-- 更新包下载服务（前台服务 + 进度通知，见 UpdateDownloadService） -->
+        <service
+            android:name=".data.update.UpdateDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <!-- 更新包安装：只暴露 files/updates/ 下的校验通过的 apk 给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths"/>
+        </provider>
+    </application>
+
+</manifest>

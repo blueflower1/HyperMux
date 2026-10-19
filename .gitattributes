@@ -1,0 +1,18 @@
+# 统一换行策略：文本文件由 git 管理，检出时保留各自约定
+* text=auto
+
+# Shell / Gradle wrapper 必须是 LF（否则 Linux/macOS 下无法执行）
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Windows 脚本保持 CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制
+*.jks binary
+*.keystore binary
+*.png binary
+*.jpg binary
+*.jar binary
+*.apk binary

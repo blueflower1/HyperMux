@@ -1,0 +1,31 @@
+# ---- 构建产物 ----
+target/
+build/
+.gradle/
+node_modules/
+admin-dist/
+admin-dist.zip
+dist/
+dist-legacy/
+*.apk
+
+# ---- 本机 / 敏感配置（切勿提交） ----
+.env
+database_config.json
+application-dev.yml
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# ---- 工具链 / IDE / 杂项 ----
+/tools/
+.kotlin/
+captures/
+*.aab
+.probe-out/
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.log
