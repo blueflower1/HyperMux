@@ -218,6 +218,9 @@ fun PlayerScreen(
     var controlTick by remember { mutableIntStateOf(0) }
     var seekHint by remember { mutableStateOf<String?>(null) }
     var resumeHint by remember { mutableStateOf<String?>(null) }
+    // 防误触退出：第一次 BACK 只给提示，2s 内再按一次才真正退出
+    var exitHint by remember { mutableStateOf(false) }
+    var lastBackAt by remember { mutableStateOf(0L) }
     var episodeFinished by remember { mutableStateOf(false) }
 
     val uiPlaying = remember { mutableStateOf(false) }
@@ -439,6 +442,12 @@ fun PlayerScreen(
         delay(3_000)
         resumeHint = null
     }
+    // 退出提示超时自动消失（窗口比 2s 判定略长，保证提示覆盖整个可确认窗口）
+    LaunchedEffect(exitHint) {
+        if (!exitHint) return@LaunchedEffect
+        delay(2_400)
+        exitHint = false
+    }
     LaunchedEffect(softDecodeHint) {
         if (!softDecodeHint) return@LaunchedEffect
         delay(4_000)
@@ -574,13 +583,22 @@ fun PlayerScreen(
                     }
 
                     Key.Back -> {
-                        // BACK：先收控制条/信息栏，再退出播放页（§9.4）
+                        // BACK：先收控制条/信息栏，再退出播放页（§9.4）；
+                        // 退出这一步做**双击确认**（防遥控器误触直接退出播放）
                         if (controlsVisible || infoVisible) {
                             controlsVisible = false
                             infoVisible = false
+                            exitHint = false
                             rootRequester.requestFocus()
                         } else {
-                            exitPlayer()
+                            val now = System.currentTimeMillis()
+                            if (exitHint && now - lastBackAt <= 2_000L) {
+                                exitHint = false
+                                exitPlayer()
+                            } else {
+                                lastBackAt = now
+                                exitHint = true
+                            }
                         }
                         true
                     }
@@ -686,6 +704,18 @@ fun PlayerScreen(
             modifier = Modifier.align(Alignment.Center)
         ) {
             CaptionCapsule(seekHint ?: "", strong = true)
+        }
+
+        // ---------- 双击退出确认提示（BACK 防误触）----------
+        AnimatedVisibility(
+            visible = exitHint,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 88.dp)
+        ) {
+            CaptionCapsule("再按一次「返回」退出播放", strong = true)
         }
 
         // ---------- 底部控制条（OK 唤出 / 4s 自动收）----------

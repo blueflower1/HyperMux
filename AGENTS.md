@@ -12,6 +12,9 @@
 - 管理面板：`hyper-mux-admin` → `npm run build:dist`（产物 `../admin-dist`，重启后端生效）
 - App：`hyper-mux-android` / `hyper-mux-android-tv` → `D:\DEV_HOME\gradle-8.12.1\bin\gradle.bat assembleDist`（JAVA_HOME=D:\DEV_HOME\jdk17）
   - 公开服务器注入：`-PhypermuxPublicServerUrl=http://host:port`（不注入则登录页只有自定义档）
+- Web 观看端：`hyper-mux-web` → `npm run build`（产物 `dist/`，可部署到 `:8080/web/` 同源子路径）
+  - 公共服务器注入：打包前 `set HYPERMUX_PUBLIC_SERVER_URL=http://host:port`（注入则默认公共服务器档；不注入默认自定义档）
+  - 跨源自定义档依赖服务端 CORS（默认放行，`hypermux.cors-origins` 可收紧）
 - adb：`D:\dev_home\android-sdk\platform-tools\adb.exe`（真机/模拟器调试可用）
 
 ## Compose UI 注意

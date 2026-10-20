@@ -5,6 +5,7 @@ import ArtPlayer from 'artplayer'
 import Icon from '@/components/Icon.vue'
 import { finishProgress, getMovieDetail, getMovieSeasons, getPlayUrl, reportProgress } from '@/api'
 import { getToken, errMsg } from '@/api/http'
+import { apiBase } from '@/stores/server'
 import type { MovieDetail, Season, VideoItem } from '@/api/types'
 import { useToastStore } from '@/stores/toast'
 import { fmtSec, progressPct } from '@/utils/format'
@@ -72,7 +73,7 @@ function reportKeepalive() {
   const id = videoId.value
   if (!v || !id || !Number.isFinite(v.duration) || v.duration <= 0 || v.currentTime * 1000 < 3000) return
   try {
-    fetch('/api/app/progress', {
+    fetch(apiBase() + '/progress', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -512,7 +513,7 @@ onBeforeUnmount(() => {
     <div class="player-box">
       <div ref="playerHost" class="player-host"></div>
       <div v-if="playState === 'loading'" class="player-state">
-        <div class="spin" style="border-top-color: #8a93ff"></div>
+        <div class="spin" style="border-top-color: #37d67a"></div>
         <span>正在获取播放地址…</span>
       </div>
       <div v-else-if="playState === 'error'" class="player-state">

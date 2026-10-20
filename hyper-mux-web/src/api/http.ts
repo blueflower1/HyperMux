@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useUserStore } from '@/stores/user'
+import { apiBase } from '@/stores/server'
 
 const TOKEN_KEY = 'hypermux.web.token'
 const EXP_KEY = 'hypermux.web.tokenExp'
@@ -49,11 +50,12 @@ export function errMsg(e: unknown): string {
 }
 
 const http = axios.create({
-  baseURL: '/api/app',
   timeout: 15000,
 })
 
 http.interceptors.request.use((config) => {
+  // 服务器档位可能在运行时切换，baseURL 每次请求动态解析
+  config.baseURL = apiBase()
   const token = getToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config

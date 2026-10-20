@@ -13,11 +13,12 @@
   --text-3: #98a0ad;
   --line: rgba(21, 26, 36, 0.08);
   --line-strong: rgba(21, 26, 36, 0.14);
-  --primary: #5b6cff;
-  --primary-hover: #4a5af0;
-  --primary-soft: rgba(91, 108, 255, 0.1);
+  --primary: #00be06;
+  --primary-hover: #009905;
+  --primary-soft: rgba(0, 190, 6, 0.1);
   --on-primary: #ffffff;
-  --accent: #ff8a3d;
+  --primary-grad: linear-gradient(135deg, #00be06, #37d67a);
+  --accent: #37d67a;
   --rating: #f5a623;
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.1);
@@ -45,9 +46,9 @@
   --text-3: #6c7482;
   --line: rgba(255, 255, 255, 0.07);
   --line-strong: rgba(255, 255, 255, 0.13);
-  --primary: #6d7dff;
-  --primary-hover: #8090ff;
-  --primary-soft: rgba(109, 125, 255, 0.16);
+  --primary: #22c96b;
+  --primary-hover: #37d67a;
+  --primary-soft: rgba(34, 201, 107, 0.16);
   --on-primary: #ffffff;
   --rating: #f5b523;
   --danger: #f2555a;
@@ -199,8 +200,8 @@ img {
   align-items: center;
   justify-content: center;
   color: var(--on-primary);
-  background: linear-gradient(135deg, var(--primary), #9a6bff);
-  box-shadow: 0 4px 12px rgba(91, 108, 255, 0.35);
+  background: var(--primary-grad);
+  box-shadow: 0 4px 12px rgba(0, 190, 6, 0.35);
 }
 
 .logo-sub {
@@ -273,7 +274,7 @@ img {
   font-size: 13px;
   font-weight: 700;
   color: var(--on-primary);
-  background: linear-gradient(135deg, var(--primary), #9a6bff);
+  background: var(--primary-grad);
 }
 
 .user-name {
@@ -520,7 +521,7 @@ img {
   background: var(--primary);
   border-color: transparent;
   color: var(--on-primary);
-  box-shadow: 0 6px 16px rgba(91, 108, 255, 0.28);
+  box-shadow: 0 6px 16px rgba(0, 190, 6, 0.28);
 }
 .btn-primary:hover {
   background: var(--primary-hover);
@@ -729,7 +730,7 @@ img {
 .card-progress i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--primary), #9a6bff);
+  background: linear-gradient(90deg, #00be06, #37d67a);
   border-radius: 0 99px 99px 0;
 }
 
@@ -797,7 +798,7 @@ img {
   width: 4px;
   height: 16px;
   border-radius: 4px;
-  background: linear-gradient(180deg, var(--primary), #9a6bff);
+  background: linear-gradient(180deg, #00be06, #37d67a);
 }
 
 .section-more {
@@ -829,11 +830,11 @@ img {
   scroll-snap-align: start;
 }
 .rail-card {
-  width: 124px;
+  width: 140px;
 }
-@media (min-width: 1100px) {
+@media (min-width: 1200px) {
   .rail-card {
-    width: 138px;
+    width: 160px;
   }
 }
 
@@ -1047,7 +1048,7 @@ img {
   color: var(--on-primary);
   background: var(--primary);
   border-color: transparent;
-  box-shadow: 0 4px 12px rgba(91, 108, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 190, 6, 0.3);
 }
 .ep-btn.is-progress {
   color: var(--primary);
@@ -1261,7 +1262,7 @@ img {
   display: block;
   height: 100%;
   border-radius: 99px;
-  background: linear-gradient(90deg, var(--primary), #9a6bff);
+  background: linear-gradient(90deg, #00be06, #37d67a);
 }
 
 .hist-actions {
@@ -1285,12 +1286,12 @@ img {
 
 .login-card {
   width: 100%;
-  max-width: 396px;
+  max-width: 760px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 22px;
   box-shadow: var(--shadow-lg);
-  padding: 36px 30px 30px;
+  padding: 32px 30px 24px;
 }
 
 .login-logo {
@@ -1302,8 +1303,8 @@ img {
   justify-content: center;
   margin: 0 auto 14px;
   color: var(--on-primary);
-  background: linear-gradient(135deg, var(--primary), #9a6bff);
-  box-shadow: 0 10px 26px rgba(91, 108, 255, 0.38);
+  background: var(--primary-grad);
+  box-shadow: 0 10px 26px rgba(0, 190, 6, 0.38);
 }
 
 .login-title {
@@ -1339,6 +1340,132 @@ img {
   text-align: center;
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* 登录页双栏：左扫码 / 右表单（呼应 TV 登录页结构）；两栏等高，表单垂直居中 */
+.login-panes {
+  display: grid;
+  grid-template-columns: 286px 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+.login-form {
+  justify-content: center;
+}
+
+.login-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.qr-frame {
+  width: 234px;
+  height: 234px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-frame img {
+  width: 206px;
+  height: 206px;
+  image-rendering: pixelated;
+}
+
+.qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 14px;
+}
+.qr-placeholder .icon {
+  opacity: 0.55;
+}
+
+.qr-status {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-align: center;
+  min-height: 18px;
+}
+.qr-status.ok {
+  color: var(--primary);
+}
+.qr-status.bad {
+  color: var(--danger);
+}
+
+.qr-note {
+  font-size: 11.5px;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* 服务器档位选择器（登录页 / 我的页共用） */
+.server-picker {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.server-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.server-picker-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.server-current {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.server-custom {
+  display: flex;
+  gap: 8px;
+}
+.server-custom .input {
+  height: 38px;
+}
+.server-custom .btn {
+  height: 38px;
+  padding: 0 14px;
+  font-size: 13px;
+  flex: none;
+}
+.server-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* 窄屏：登录双栏改上下堆叠（扫码在上） */
+@media (max-width: 700px) {
+  .login-panes {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
 }
 
 /* ---------- 我的 ---------- */
@@ -1563,7 +1690,7 @@ img {
     font-size: 17px;
   }
   .rail-card {
-    width: 108px;
+    width: 140px;
   }
   .cat-chips {
     display: flex;
@@ -1607,6 +1734,9 @@ img {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 14px 10px;
   }
+  .rail-card {
+    width: 116px;
+  }
   .hero-cover {
     width: 96px;
   }
@@ -1619,4 +1749,12 @@ img {
 .artplayer {
   --ap-play-button-next-display: none;
   font-family: inherit;
+}
+
+/* artplayer 5 主题色变量：品牌绿（深色主题提亮） */
+.player-host .art {
+  --art-theme: #00be06;
+}
+[data-theme='dark'] .player-host .art {
+  --art-theme: #22c96b;
 }

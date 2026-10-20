@@ -29,8 +29,8 @@ android {
         applicationId = "com.hypermux.mobile"
         minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.1.13"
+        versionCode = 15
+        versionName = "0.1.14"
 
         // 留空 = 首次启动引导填写；可用 -PhypermuxApiBase=http://host:port 在构建期预置
         buildConfigField("String", "API_BASE", "\"${(rootProject.findProperty("hypermuxApiBase") ?: "")}\"")

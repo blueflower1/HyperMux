@@ -26,7 +26,9 @@
 | 大小 | 字节数（`size` 字段），展示单位由前端换算 |
 | 评分 | `rating`：`number`，0~10 一位小数（`3.5`/`null`） |
 
-**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；`/api/app/**` 要普通用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。
+**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；扫码登录的 `POST /api/app/auth/qr/create`、`GET /api/app/auth/qr/status`（§3.12）免认证（目标端登录前可用），`qr/scan`、`qr/confirm` 需普通用户 token；`/api/app/**` 要普通用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。
+
+**CORS**：`/api/**` 默认放行跨源（`hypermux.cors-origins`，逗号分隔 pattern，置空禁用），供 Web 观看端「自定义/预设服务器」跨源访问；鉴权走 `Authorization` 头不吃 Cookie，故 `allowCredentials=false` + 通配源不引入 CSRF 面。
 
 ---
 
@@ -266,6 +268,32 @@ Query：
 
 Query：`platform`（同上）。响应：APK 全量流式（`application/vnd.android.package-archive` + `Content-Length` + `Content-Disposition: attachment; filename="hypermux-{platform}-{versionName}.apk"`）；**不支持 Range**，客户端失败即整包重下。
 错误：404（该平台未发布 / 文件缺失——文件被手工删除后记录仍在，提示"请重新发布"）。
+
+### 3.12 扫码登录（TV / Web 显示二维码 → 手机 App 确认）
+
+二维码载荷只含不透明 UUID，不含任何秘密：`hypermux://tv-login?id=<uuid>`（TV 端）、`hypermux://web-login?id=<uuid>`（Web 端）。ticket 存内存（Caffeine），**60s 有效**（按创建时间判定），不落库；create 按 IP 限频 20 次/分钟。
+
+#### `POST /api/app/auth/qr/create`（免认证）
+
+目标端（TV / Web 登录页）进入时调用。响应 `data`：`{ "qrId": "<uuid>", "expiresIn": 60 }`。
+
+#### `GET /api/app/auth/qr/status?id=<uuid>`（免认证）
+
+目标端每 2s 轮询。响应 `data`：`{ "state": "PENDING|SCANNED|CONFIRMED|EXPIRED", "session": LoginResult|null }`。
+
+- `PENDING` 已创建未扫码；`SCANNED` 手机已扫码待确认（目标端显示"请在手机确认"）
+- `CONFIRMED`：**session 仅在此刻非空，且只投递一次**（随后 ticket 进入 DELIVERED，防止二维码被拍照后事后扫码盗 token）
+- `EXPIRED`：过期或已投递；目标端应换新码（客户端按 60s 自行刷新，勿高频 create）
+
+#### `POST /api/app/auth/qr/scan`（需手机 token，role=0）
+
+Body：`{ "id": "<uuid>" }`。响应 `data: true`。手机解出码后、弹确认框之前调用；失败不阻塞后续 confirm。
+
+#### `POST /api/app/auth/qr/confirm`（需手机 token，role=0）
+
+Body：`{ "id": "<uuid>" }`。响应 `data: true`。绑定当前手机用户并签发与密码登录同规则的 JWT；幂等（重复 confirm 不重复签发）。错误：404 码已过期 / 403 账号不可用。
+
+> 手机端只有登录后才能进入「扫一扫」，"必须登录才能确认"天然成立；确认前必须用户在手机上显式点确认。
 
 ---
 

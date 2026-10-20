@@ -167,12 +167,12 @@ fun MeScreen(navController: NavController) {
             ) {
                 session?.let { user -> UserCard(user) }
 
-                // 扫一扫登录 TV 端（与 TV 登录页二维码配对；本页必然已登录，天然满足前置条件）
+                // 扫一扫登录 TV / 网页端（与目标端登录页二维码配对；本页必然已登录，天然满足前置条件）
                 Section(title = "常用") {
                     HyperCard(modifier = Modifier.fillMaxWidth()) {
                         InfoRow(
                             label = "扫一扫",
-                            value = "登录 HyperMux TV",
+                            value = "登录 HyperMux TV / 网页端",
                             onClick = { navController.navigateScan() },
                             showDivider = false,
                             trailing = {

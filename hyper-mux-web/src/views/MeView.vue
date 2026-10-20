@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
 import { useThemeStore, type Theme } from '@/stores/theme'
 import { useUserStore } from '@/stores/user'
+import { activeServerLabel } from '@/stores/server'
 import { fmtDate } from '@/utils/format'
 import { getExp } from '@/api/http'
 
@@ -61,6 +62,14 @@ function setThemeAt(t: Theme, e: MouseEvent) {
         <span class="me-row-label"><Icon name="history" :size="17" /> 登录信息</span>
         <span class="me-row-value">{{ expireText }}</span>
       </div>
+    </div>
+
+    <div class="me-section card" style="padding: 6px">
+      <div class="me-row" style="cursor: default">
+        <span class="me-row-label"><Icon name="globe" :size="17" /> 服务器</span>
+        <span class="me-row-value">{{ activeServerLabel() }}</span>
+      </div>
+      <div class="server-hint" style="padding: 0 12px 8px">切换服务器需先退出登录，在登录页操作</div>
     </div>
 
     <button class="me-logout" type="button" @click="logout">

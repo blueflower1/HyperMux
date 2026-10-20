@@ -28,6 +28,12 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS preflight（OPTIONS）不做鉴权：Spring 6 的 preflight 也会走拦截器链，
+        // 放行后由框架 CORS 层直接应答（带 Access-Control-* 头）。
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+
         String path = request.getRequestURI();
         int expectRole = path.startsWith("/api/admin") ? AuthService.ROLE_ADMIN : AuthService.ROLE_APP_USER;
 

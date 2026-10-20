@@ -29,7 +29,7 @@ function runReveal(from: { x: number; y: number }) {
 
   // 主题刚落定为新主题，读取到的即新主题的主色
   const accent =
-    getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#5b6cff'
+    getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#00be06'
 
   const r = Math.hypot(
     Math.max(from.x, window.innerWidth - from.x),

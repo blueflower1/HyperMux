@@ -4,9 +4,13 @@ import { fileURLToPath, URL } from 'node:url'
 
 // 开发 :5174，/api 代理到后端 :8080。
 // base './' 相对路径：构建产物可放在任意子路径（如 :8080/web/ 同源部署）直接打开。
+// 预设公共服务器：HYPERMUX_PUBLIC_SERVER_URL=http://host:port npm run build（不注入 = 无预设档，语义同 Android 的 -PhypermuxPublicServerUrl）
 export default defineConfig({
   base: './',
   plugins: [vue()],
+  define: {
+    __HYPERMUX_PUBLIC_SERVER__: JSON.stringify(process.env.HYPERMUX_PUBLIC_SERVER_URL ?? ''),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

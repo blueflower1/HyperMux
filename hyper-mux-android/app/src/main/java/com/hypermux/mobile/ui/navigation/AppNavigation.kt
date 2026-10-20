@@ -356,7 +356,7 @@ fun AppNavigation() {
             }
         }
 
-        // ---- 扫一扫（二级页：扫 TV 登录二维码） ----
+        // ---- 扫一扫（二级页：扫 TV / 网页端登录二维码） ----
         composable(
             Route.Scan,
             enterTransition = PageEnterTransition,

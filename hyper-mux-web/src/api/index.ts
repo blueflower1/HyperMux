@@ -9,6 +9,8 @@ import type {
   Page,
   PlayUrl,
   ProgressReportResult,
+  QrCreateResult,
+  QrStatusResult,
   SeasonResult,
 } from './types'
 
@@ -66,4 +68,14 @@ export function login(username: string, password: string) {
       const msg = e instanceof Error ? e.message : '登录失败'
       throw new Error(msg)
     })
+}
+
+/** 扫码登录（契约同 TV 端）：匿名创建一次性登录码（60s） */
+export function qrCreate() {
+  return api.post<QrCreateResult>('/auth/qr/create')
+}
+
+/** 扫码登录：轮询状态；CONFIRMED 时 session 一次性投递 */
+export function qrStatus(id: string) {
+  return api.get<QrStatusResult>('/auth/qr/status', { id })
 }

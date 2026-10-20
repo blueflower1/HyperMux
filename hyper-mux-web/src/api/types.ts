@@ -150,3 +150,14 @@ export interface ProgressReportResult {
   finished: number
   updateTime: number
 }
+
+/** 扫码登录（契约同 TV 端） */
+export interface QrCreateResult {
+  qrId: string
+  expiresIn: number
+}
+
+export interface QrStatusResult {
+  state: 'PENDING' | 'SCANNED' | 'CONFIRMED' | 'EXPIRED'
+  session: LoginResult | null
+}
