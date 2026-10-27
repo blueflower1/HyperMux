@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HyperMux",
+  "version": "1.1.0",
+  "identifier": "com.hypermux.desktop",
+  "build": {
+    "frontendDist": "../../hyper-mux-web/dist",
+    "devUrl": "http://localhost:5174",
+    "beforeDevCommand": "npm --prefix ../hyper-mux-web run dev",
+    "beforeBuildCommand": "npm --prefix ../hyper-mux-web run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HyperMux",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 940,
+        "minHeight": 620,
+        "center": true,
+        "decorations": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "externalBin": ["sidecars/mpv", "sidecars/aria2c"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "headerImage": "icons/install-header.bmp",
+        "sidebarImage": "icons/install-sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

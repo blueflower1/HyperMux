@@ -1,0 +1,21 @@
+[package]
+name = "hypermux-desktop"
+version = "0.1.0"
+description = "HyperMux Windows desktop client"
+edition = "2021"
+
+# Tauri v2 标准结构：lib 承载应用逻辑，main 仅入口（便于日后加 mobile target）
+[lib]
+name = "hypermux_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

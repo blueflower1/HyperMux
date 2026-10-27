@@ -1,0 +1,16 @@
+{
+  "name": "hypermux-windows",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HyperMux Windows 桌面客户端（Tauri 壳 + hyper-mux-web 前端 + mpv 解码兜底）",
+  "scripts": {
+    "tauri": "tauri",
+    "ensure-sidecars": "node ensure-sidecars.mjs",
+    "dev": "node ensure-sidecars.mjs && tauri dev",
+    "build": "node build.mjs",
+    "icon": "tauri icon app-icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+# 插件二进制（mpv / aria2c，合计约 120MB）不入库：
+# `npm run build` / `npm run dev` 会先跑 ensure-sidecars.mjs 从公共 OpenList 直链补齐
+src-tauri/sidecars/
+*.part

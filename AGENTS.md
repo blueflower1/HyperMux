@@ -15,6 +15,7 @@
 - Web 观看端：`hyper-mux-web` → `npm run build`（产物 `dist/`，可部署到 `:8080/web/` 同源子路径）
   - 公共服务器注入：打包前 `set HYPERMUX_PUBLIC_SERVER_URL=http://host:port`（注入则默认公共服务器档；不注入默认自定义档）
   - 跨源自定义档依赖服务端 CORS（默认放行，`hypermux.cors-origins` 可收紧）
+- Windows 桌面端：`hyper-mux-windows` → `npm run build`（Tauri v2；公共服务器注入：`npm run build -- --public-server=http://host:port`，不注入则登录页只有自定义档；产物自动归位 `dist\hypermux-windows-<version>-setup.exe`，与 Android dist 风格一致；重打前先关闭运行中的 hypermux-desktop.exe，exe 被占用会构建失败）
 - adb：`D:\dev_home\android-sdk\platform-tools\adb.exe`（真机/模拟器调试可用）
 
 ## Compose UI 注意

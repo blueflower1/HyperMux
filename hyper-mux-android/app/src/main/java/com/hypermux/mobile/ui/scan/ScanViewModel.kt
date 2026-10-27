@@ -98,11 +98,16 @@ class ScanViewModel @Inject constructor(
     companion object {
         const val KIND_TV = "tv"
         const val KIND_WEB = "web"
+        const val KIND_WIN = "win"
 
-        /** 载荷格式：hypermux://tv-login?id=<uuid> 或 hypermux://web-login?id=<uuid>（只含不透明 id，不含任何秘密） */
-        private val QR_RE = Regex("^hypermux://(tv|web)-login\\?id=([0-9a-fA-F-]{36})$")
+        /** 载荷格式：hypermux://{tv|web|win}-login?id=<uuid>（只含不透明 id，不含任何秘密） */
+        private val QR_RE = Regex("^hypermux://(tv|web|win)-login\\?id=([0-9a-fA-F-]{36})$")
 
         /** UI 用的目标显示名 */
-        fun targetName(kind: String?): String = if (kind == KIND_WEB) "网页端" else "TV 端"
+        fun targetName(kind: String?): String = when (kind) {
+            KIND_WEB -> "网页端"
+            KIND_WIN -> "Windows 端"
+            else -> "TV 端"
+        }
     }
 }
