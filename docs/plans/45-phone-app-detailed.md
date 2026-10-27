@@ -379,10 +379,53 @@ onStop → if(isPlaying) pause() + 上报；onDestroy → release()
 |---|---|---|
 | IOException / 408 超时 | 网络或资源速度较慢 | 4s 后自动重试 ×1（同集同断点） |
 | HTTP 4xx（403/404） | 链接不可用（可能失效） | 不重试；按钮：手动重试 / 返回详情 |
-| MediaCodec/不支持流错误码 | 该格式设备不支持（HEVC/10bit?），建议换 H264 源 | 不重试；按钮：返回详情 |
+| MediaCodec/不支持流错误码 | 硬解与软件解码都失败：当前设备硬解和软件解码都处理不了该片源（AV1 / HEVC / 10bit 等），建议换 H264 源 | **先走音轨回退阶梯**（见 §6.5.2），阶梯耗尽再**自动换软解档重试一次**（见 §6.5.1），仍失败才不重试 |
+| 阶梯走到静音后仍失败 | 当前设备硬解和软件解码都处理不了该片源的**音轨**（DTS / 杜比 DDP 等），建议把音轨换成 AAC 立体声 | 不重试（`classifyPlaybackError(error, audioTrackFailure = true)`） |
 | 其他 | 播放出错了 | 自动 ×1 → 手动 |
 
 - 错误时保持黑屏+居中面板（不 release player 以保留重试上下文）。
+
+#### 6.5.1 解码优先级与「硬解失败自动换软解」兜底
+
+`PlayerController` 的 renderers 工厂有两档，由构造参数 `preferSoftwareDecode` 决定：
+
+| 档 | MediaCodecSelector | ExtensionRendererMode | 语义 |
+|---|---|---|---|
+| 硬解优先（默认） | `HardwareOnlyCodecSelector`（只返回硬解） | `ON` | 有硬解走硬解；**平台完全无硬解**时 MediaCodec 渲染器声明不支持 → 落到 NextLib 的 FFmpeg 渲染器 |
+| 软解优先（兜底） | `MediaCodecSelector.DEFAULT`（硬解 + 平台软解全量候选） | `PREFER` | FFmpeg 抢在 MediaCodec 之前，任何片源都先试软解 |
+
+为什么必须有第二档：默认档下只要设备**声明**了某个硬解，`MediaCodecRenderer` 就认为自己能解，FFmpeg 扩展渲染器永远轮不到；而厂商硬解常见"谎报能力"（只支持 8-bit Main profile、或有分辨率/帧率上限），此时 `setEnableDecoderFallback(true)` 只能在硬解候选里打转 → 整片直接报 `DECODING_FAILED` / `DECODING_FORMAT_EXCEEDS_CAPABILITIES`。典型现象：同一部 AV1 片源，骁龙 8 Gen 3（`c2.qti.av1.decoder`，3840×2176@60）正常，另一台机器直接弹"无法解码"。
+
+两条硬规则（模拟器实测得出，两端一致，违反任何一条都会让"软解兜底"反而更糟）：
+
+1. **`HardwareOnlyCodecSelector` 只作用于视频 mime**：对 `audio/` 前缀直接返回平台默认候选。实测反例——模拟器只有 `c2.android.aac.decoder`（软解），被本 selector 剔除后 `MediaCodecAudioRenderer` 声明不支持 → `FfmpegAudioRenderer` 接手**普通 AAC** → `ffmpeg_jni: Error in swr_init: Invalid argument`（该 `Format` 的 `channelCount` 未设）→ 整片 `DECODING_FAILED`。平台软音频解码器开销极低，把音频抢给 FFmpeg 没有任何收益，只有 DTS / TrueHD 这类平台解不了的音轨才需要 FFmpeg 音频渲染器。
+2. **`PREFER` 只允许作用在视频上**：`setExtensionRendererMode()` 是全局的，会把音频渲染器一起顶到前面，同样踩第 1 条坑。所以软解优先档不用裸 `NextRenderersFactory`，而用 `SoftwareFirstVideoRenderersFactory`（`NextRenderersFactory` 子类）覆盖 `buildAudioRenderers`，把音频的扩展模式强制降回 `ON`。覆盖签名（media3 1.7.1，javap 核对）：`buildAudioRenderers(Context, Int, MediaCodecSelector, Boolean, AudioSink, Handler, AudioRendererEventListener, ArrayList<Renderer>)` —— 升级 media3 时须同步核对。
+
+触发与流程（`PlayerScreen.switchToSoftwareDecode()`）：
+
+1. `onPlayerError` 收到解码类错误码（`DECODER_INIT_FAILED` / `DECODER_QUERY_FAILED` / `DECODING_FAILED` / `DECODING_FORMAT_UNSUPPORTED` / `DECODING_FORMAT_EXCEEDS_CAPABILITIES`）
+2. 先走**音轨回退阶梯**（§6.5.2，最多 3 跳）：声道上限 → 指定另一条安全音轨 → 静音保画面；判据用 `ExoPlaybackException.rendererFormat` 的 `sampleMimeType`，只有音轨侧的失败才进阶梯
+3. 仍失败 → 自动换档：记下当前位置 → 即时上报断点 → `softwareDecodeFallback = true` → `remember(softwareDecodeFallback)` 重建 `PlayerController`（软解优先档）→ `LaunchedEffect(playUrl, controller)` 用同一 URL 重新装配 → 新 player `STATE_READY` 时 seek 回原位置，并提示「硬解失败，已改用软件解码重试」
+4. 只切一次（`softwareFallbackTried`）；软解档也失败才落 §6.5 的错误面板，不反复重建
+
+因为换档 = 换 ExoPlayer 实例，所有长生命周期 effect（`Player.Listener`、`AnalyticsListener`、进度轮询、断点上报、倍速应用）都必须以 `controller` 为 key —— 否则会读到已 release 的旧实例。同理，音轨阶梯已经生效的 `trackSelectionParameters` 也会随实例归零，所以装配 MediaItem 前要先 `AudioFallbackState.restoreOn(...)` 把声道上限/禁音带回来。
+
+#### 6.5.2 音轨回退阶梯（`ui/player/AudioFallback.kt`，两端各一份镜像）
+
+**问题形状**（实测片源 `…2160p.IQ.WEB-DL.H.265.DDP5.1.mkv`）：MKV 把 `E-AC3(DDP) 5.1` 标成 `default`，旁边才是百分百能解的 `AAC LC 立体声`；本项目不设语言/声道偏好，`DefaultTrackSelector` 于是正好选中那条不安全的，一路失败即**整片**失败 —— 而旧容错只有一招「禁音重试一次」，安全轨完全轮不到。
+
+| 跳 | 动作 | 何时命中 |
+|---|---|---|
+| 1 `CHANNEL_CAP` | `maxAudioChannelCount = 2`（恢复用 `Integer.MAX_VALUE`） | 存在 ≤2 声道（或声道数未声明）的其它轨 |
+| 2 `FORCE_TRACK` | `clearOverrides()` + 放开声道上限 + `setOverrideForType(TrackSelectionOverride(group, listOf(idx)))` | 剩下的轨都是 5.1，但 mime 属于「平台或 FFmpeg 兜底能解」的安全序（AAC/Opus/Vorbis/MP3/FLAC < AC3/E-AC3/AC4 < TrueHD/DTS 系） |
+| 3 `MUTED` | `setTrackTypeDisabled(TRACK_TYPE_AUDIO, true)` | 换无可换（例如只有一条 DTS 轨） |
+
+- 阶梯**单调**（`NONE → CHANNEL_CAP → FORCE_TRACK → MUTED`）且失败过的 mime 记进 `triedMimes`，最多 3 跳，防 `prepare()` 打转。
+- 判据：`ExoPlaybackException`（`PlaybackException` 子类）的 `rendererFormat.sampleMimeType`；`AnalyticsListener` 在 media3 1.7 已无 `DecoderInfo` / `onDecoderInitError`，不可用作判据。
+- `TrackSelectionOverride` 的 key 是 `TrackGroup` 实例 → 只能在出错时从**当前** `player.currentTracks` 现取现用，跨实例不带。
+- 每跳都记 logcat（`音轨解码失败 mime=… → 阶梯 …（第 N 跳）`），供 §机型矩阵 与片源兼容性归因统计。
+- 已知边界：MKV 轨名拿不到（`MatroskaExtractor` 只把 NAME 存进内部 `Track.name`，不写 `Format.label`），提示文案走通用版。
+- 单测：`app/src/test/java/com/hypermux/mobile/ui/player/AudioFallbackTest.kt`（需 `unitTests.isReturnDefaultValues = true`，因为构造 Media3 `Format`/`TrackGroup` 会路过 `android.text.TextUtils` 桩）。
 
 ### 6.6 自动连播（与 TV 端 §7.4 同语义）
 
@@ -506,3 +549,55 @@ onStop → if(isPlaying) pause() + 上报；onDestroy → release()
 - App 内公告（`app_config` 表已预留）
 - 推送（新版本/更新提醒）
 - TV 端复用：手机端验证后的数据层/播放器状态机回灌 TV 端（D8 公共模块抽取）
+
+---
+
+## 14. 投屏（M7 · 2026-10-22 新增）
+
+> 唯一事实源：[80-cast-detailed.md](./80-cast-detailed.md)（流程口径、状态机、失败模式、测试流程与预期结果）；接口契约：[30-api-contract §3.13](./30-api-contract.md)。
+
+**14.1 手机端职责边界（重要）**
+
+手机端本期**只是"能远程投送的设备"，不是遥控器**：
+- 有：投屏入口、目标设备选择、等待确认、结果弹窗、取消投屏、设备列表。
+- 没有：播放/暂停/seek/选集/音量等任何遥控控件，没有 TV 播放状态回显。
+
+**14.2 设备身份**
+
+| 项 | 做法 |
+|---|---|
+| `device_id` | 新增独立 DataStore `name = "device"`（不塞进 `settings`：设备身份与用户偏好是两回事）；首次访问 `UUID.randomUUID()` 落盘，之后只读；卸载重装 = 新 id |
+| `device_name` | 默认 `手机 · ${Build.MODEL}`，「我的」页可改（≤64） |
+| `cast_last_target` | 上次成功投屏的 TV deviceId，设备弹层据此高亮「上次使用」 |
+| 注册时机 | `AppNavigation` 的 `LaunchedEffect(session != null)`（登录成功与启动恢复会话都走这里）、打开投屏设备弹层、进入「我的」页，各调一次 `POST /api/app/devices/register`（幂等，顺带刷在线）；登出时 `CastState.clear()` |
+
+**14.3 新增文件**
+
+`data/repo/DeviceRepo.kt`、`data/cast/CastState.kt`（`@Singleton` 投屏状态机：`active/waiting/outcome/enabled` + `send/startPolling/cancelActive/restore/clear`，走现有 `safeApiCall`）、`ui/cast/CastViewModel.kt`（薄壳，把 `CastState`+`DeviceRepo` 暴露给页面）、`ui/cast/CastDeviceSheet.kt`、`ui/cast/CastStatusDialog.kt`、`ui/cast/CastUi.kt`（`CastButton` / `CastSentOverlay` / `CastActiveChip`）；改 `data/api/ApiService.kt`（+8 方法）、`data/model/Models.kt`（+10 模型）、`config/AppConfig.kt`（`CAST_POLL_INTERVAL_MS=1_000L`、`CAST_POLL_MAX_MS=17_000L`）、`ui/player/PlayerIcons.kt`（自绘 `Cast` 图标）。Manifest 无需新权限。
+
+> `CastState` 是 `@Singleton`：播放页 / 详情页 / 「我的」页各自的 `CastViewModel` 读同一份状态，切页不丢投屏状态。
+
+**14.4 交互流程**
+
+```
+播放页/详情页「投屏」→ CastDeviceSheet（同账号 tv 设备）
+   在线：可点（绿点，上次成功目标默认高亮，DataStore cast_last_target）
+   离线：灰显不可点 + 「离线 · 请先在电视上打开 HyperMux」+ 右上角「刷新」
+→ POST cast/request → CastStatusDialog「正在等待「{TV名}」确认…」（带「取消投屏」）
+   协程每 1s 轮 GET cast/request/status（上限 17s）
+   ACCEPTED   → 弹窗「TV端已接受你远程投屏的请求」；本地 playWhenReady=false +
+                播放区被 CastSentOverlay 盖住（封面 + 片名 + 集 +「取消投屏」）
+   REJECTED   → 弹窗「TV端已拒绝投屏请求」
+   EXPIRED    → 弹窗「电视端未响应，请稍后重试」
+   CANCELLED  → 弹窗「已取消投屏」
+   连续 2 次轮询失败 → 弹窗「投屏失败：{msg}」
+投屏生效期间：active 非空 → 起 5s 一轮的 cast/current 低频观察，
+   TV 退出播放 / 被接管时手机卡 ≤5s 自己消失（无推送通道，只能靠这层确认）
+```
+
+**14.5 与播放器的耦合（关键约束）**
+
+- **投屏闸门**：`PlayerViewModel` 注入 `CastState`，`isCasting` 时 `reportProgress()` 直接 return —— 否则手机与 TV 双写 `play_progress`（`uk_progress_user_video` 是 upsert），会把 TV 的断点覆盖回手机旧位置。
+- 投屏成功后手机本地播放必须**停止**（避免双声道）：`LaunchedEffect(castActive)` 里 `playWhenReady = false`，同时手势层 `enabled = false`；播放器实例不重建（沿用现有 `DisposableEffect { controller.release() }` 生命周期）。
+- 从详情页发起时 `positionMs` 取该集服务端断点（`VideoItemVo.progress`）或 0，不取本地缓存。
+- 手机切后台再回前台：用 `GET /api/app/cast/current`（`data.active`）恢复「已投送至 …」卡，不重复发起。

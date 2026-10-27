@@ -19,6 +19,9 @@ import android.media.MediaCodecInfo as PlatformCodecInfo
  * 的软件解码器一旦出现在候选里，MediaCodec 渲染器就会认为「可解码」从而**先于 FFmpeg** 被选中，
  * 而 4K HEVC 上平台软解极慢、体验远差于 FFmpeg 软解。把它们剔除，等于把软解场景让给 FFmpeg。
  *
+ * **本策略只作用于视频 mime**：音频类 mime（`audio/` 前缀）直接交回平台默认候选（见 [getDecoderInfos]）——
+ * 平台软音频解码器开销极低，而把普通 AAC 抢去跑 FFmpeg 反而会在 NextLib 的 `swr_init` 上失败（实测）。
+ *
  * 实现方式：直接用平台 API 枚举解码器——
  *  - 只取解码器（`isEncoder == false`）且 `supportedTypes` 命中目标 mime（含 video/av01、video/hevc）；
  *  - 跳过别名解码器（API 29+ 的 alias）与非 secure 场景下名字带 `.secure` 的变体；
@@ -32,6 +35,16 @@ object HardwareOnlyCodecSelector : MediaCodecSelector {
         requiresSecureDecoder: Boolean,
         requiresTunnelingDecoder: Boolean
     ): List<MediaCodecInfo> {
+        // **音频不参与"只认硬解"策略**：平台软音频解码器（AAC / MP3 / Vorbis…）开销极低，
+        // 让它们留在候选里永远比把音频抢去跑 FFmpeg 更安全。
+        // 实测反例：模拟器只有 c2.android.aac.decoder（软解），被本 selector 剔除后
+        // MediaCodec 音频渲染器声明不支持 → FfmpegAudioRenderer 接手普通 AAC →
+        // `swr_init: Invalid argument`（该 Format 的 channelCount 未设）→ 整片报 DECODING_FAILED。
+        // FFmpeg 音频渲染器仍然保留在候选末尾，只服务平台真的解不了的音轨（DTS / DTS-HD / TrueHD 等）。
+        if (mimeType.startsWith("audio/")) {
+            return defaultDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+        }
+
         // 本项目只做普通（非 DRM、非隧道）播放：加密/隧道场景交回默认实现，避免选到不满足要求的解码器
         if (requiresSecureDecoder || requiresTunnelingDecoder) {
             return defaultDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)

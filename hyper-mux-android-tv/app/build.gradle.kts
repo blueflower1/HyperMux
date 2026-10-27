@@ -29,8 +29,8 @@ android {
         applicationId = "com.hypermux.tv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 106
+        versionName = "1.1.2"
 
         // 留空 = 首次启动引导填写；可用 -PhypermuxApiBase=http://host:port 在构建期预置
         // （TV 盒子通常与后端同局域网，构建期预置可免去遥控器手输地址）

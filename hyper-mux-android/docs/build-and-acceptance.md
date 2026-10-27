@@ -72,7 +72,7 @@ gradle assembleRelease -PhypermuxCleartext=false
 
 | 机型 / 系统 | 分辨率 | 编解码 | 结果 | 备注 |
 |---|---|---|---|---|
-| （待填） | | | | HEVC/10bit 软解卡顿归因 |
+| （待填） | | | | HEVC/10bit 软解卡顿归因；音轨兼容性按 §17 的「音轨解码失败 mime=… → 阶梯 …」日志行填（mime × 命中哪一跳） |
 
 ### 单测（JVM）
 
@@ -91,7 +91,7 @@ gradle assembleRelease -PhypermuxCleartext=false
 | 2 | Coil 3 依赖坐标错误 | Coil 3 的 groupId 是 `io.coil-kt.coil3`（非 Coil 2 的 `io.coil-kt`） | 修正 `libs.versions.toml` |
 | 3 | Coil 3 缓存 API 不存在 | Coil 3 无 `ImageLoader.Builder.memoryCachePercent/diskCachePercent` | 用 `MemoryCache.Builder().maxSizePercent(ctx, 0.25)` + `DiskCache.Builder().directory(File).maxSizePercent(0.05)` |
 | 4 | 中文源码被按 GBK 误读 | 中文 Windows 上 JDK17 默认字符集为 GBK，Kotlin 编译守护进程/ KSP worker 独立 fork | `kotlin.daemon.jvmargs=-Dfile.encoding=UTF-8` + 构建时注入 `JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8` |
-| 5 | `ServerUrlInterceptor.kt` 报 `Unclosed comment` | Kotlin **块注释支持嵌套**，KDoc 正文里出现 `/**`（形如 `/d/**`）会开启嵌套注释 | 正文避免 `/**`，并全项目核对 `/*` 与 `*/` 配平 |
+| 5 | `ServerUrlInterceptor.kt` 报 `Unclosed comment` | Kotlin **块注释支持嵌套**，KDoc 正文里出现 `/**`（形如 `/d/**`）会开启嵌套注释；`audio/*` 这类写法同样会开一层嵌套（`MediaCodecs.kt` 复发过一次） | 正文避免 `/**` 与 `xxx/*`，并全项目核对 `/*` 与 `*/` 配平 |
 | 6 | 一批 API 误用/缺导入 | 未编译过的代码里存在过时/臆测 API：`Material3.pullrefresh`（应为 `pulltorefresh.PullToRefreshBox`）、`GridItemSpan.maxLineSpan`（应为 `GridItemSpan(maxLineSpan)`）、`Modifier.clickable(onLongClick=)`（应为 `combinedClickable`）、`kotlinx.coroutines.flow.snapshotFlow`（应为 `androidx.compose.runtime.snapshotFlow`）、`dagger.hilt.EntryPointAccessors`（应为 `dagger.hilt.android.EntryPointAccessors`）、`Color.HSVToColor`（需 `android.graphics.Color`）、`ExoPlayer.Builder.setMinBufferMs`（应为 `DefaultLoadControl`）、`ExoPlayer.retry()`（Media3 1.7 已移除，用 `prepare()`）、`MediaItem.Builder.setHeaders`（已移除，改由 DataSource 注入请求头）、`awaitEachGesture` 包名（`foundation.gestures`）、`AwaitPointerEventScope` 受 `@RestrictsSuspension` 限制不能用 `coroutineScope/launch`（改用 `detectTapGestures` + `onPress.tryAwaitRelease()`）、`StateFlow` 直接 `by` 委托（需 `collectAsStateWithLifecycle()`） | 逐一修正，见各文件 |
 | 7 | KSP2 与 Hilt 兼容性 | KSP 2.0.21 默认启用 KSP2，与 Hilt 存在已知不兼容（dagger #4303） | `gradle.properties` 加 `ksp.useKSP2=false`（注意是大写 KSP2） |
 | 8 | OkHttp `HttpUrl.parse` 为 ERROR 级废弃 | OkHttp 4.12 将其标记为 `DeprecationLevel.ERROR` | 改用 `String.toHttpUrlOrNull()`；`newBuilder()` 用 `encodedPath()` 保留原路径 |
@@ -465,5 +465,41 @@ val bannerHeight = (bannerWidth / 3.2f).coerceAtLeast(150.dp)
 | 15 | **手机回归** | 360dp 手机逐屏与 0.1.11 对比：首页 2 列、分类/搜索 3 列、详情 5 列、播放页 6 列、弹窗铺满、播放页默认竖屏 —— 必须完全一致 |
 
 > 尺寸类问题沿用 §13 的 `uiautomator` bounds 查法；平板上重点比对「列数 × 格子宽度」与 §16.2 表格的期望值。
+
+## 17. 第十二轮：音轨回退阶梯（杜比 DDP / DTS 片源「整片失败」或「有画面没声音」）（2026-10-27，1.1.2 / versionCode 114）
+
+**触发片源**：`小城良方 S01E01 2160p IQ WEB-DL H.265 DDP5.1.mkv`（≈1.04GB，整体 3172 kb/s）
+
+| 流 | 实测 | 兼容性含义 |
+|---|---|---|
+| #0:0 视频 | HEVC **Main 8bit**、yuv420p(tv)、3840×1608（SAR 1:1 / DAR 160:67 遮幅）、25fps、2.72 Mbps | 最安全的 HEVC 变体（不是 Main10/HDR）；4K 硬解普遍可用，TV 盒子实测画面正常 |
+| #0:1 音轨 | **E-AC3(DDP) 5.1**、48k、256k，带 `default` 标志 | 全文件最脆的一环：它被标 default，所以会被优先选中 |
+| #0:2 音轨 | AAC LC 立体声、44.1k、≈192k | 百分百能解，但因为不是 default，旧逻辑里完全轮不到 |
+| #0:3 字幕 | SubRip(SRT) 内嵌 | Media3 自己渲染（默认样式）；该轨只到 40:39，片尾 5 分钟无字幕 —— 不是播放问题 |
+| tags | 32 条 `refer to a non-existent track` 警告（`Muxer: Anti-Piracy` 写的假 TrackUID） | 对播放无影响：`MatroskaExtractor` 不读 Tags |
+
+**真根因**：本项目不设语言/声道偏好，`DefaultTrackSelector` 在没有偏好时按 `default` 标志走 → 正好选中那条设备不一定能解的 DDP 5.1；而一路 renderer 初始化失败会让**整片**报错。老容错只有一招「禁音轨重试一次」，于是旁边那条安全 AAC 白放着：手机表现为「已静音播放」，TV 更糟 —— 连提示都没有，只点了软解提示，用户只能误判成"片源坏了"。
+
+**修复**：新增 `ui/player/AudioFallback.kt`（手机 / TV 各一份镜像，与 `PlayerError.kt`、`MediaCodecs.kt` 同风格），`PlayerScreen.kt` 的 `onPlayerError` 改走阶梯：
+
+| 跳 | 动作 | 适用 |
+|---|---|---|
+| 1 `CHANNEL_CAP` | `maxAudioChannelCount = 2`，5.1 轨被选择器滤掉，自然落到立体声轨 | 本类片源（DDP 5.1 + AAC 立体声）一跳解决 |
+| 2 `FORCE_TRACK` | 对剩下的最安全候选下 `TrackSelectionOverride`（先 `clearOverrides()` 并放开声道上限，否则 override 会被上限滤掉） | 两条轨都是 5.1（如 E-AC3 + DTS-HD）时把 DTS 交给 FFmpeg 渲染器 |
+| 3 `MUTED` | 禁音保画面（原有行为，最后一招） | 只有一条环绕声轨（DTS 单轨）→ 不白跑前两跳 |
+
+配套定案：
+
+- **判据不靠猜**：Media3 1.7.1 的 `ExoPlaybackException`（`PlaybackException` 的子类）带 `rendererFormat`，直接读失败那一跳正在解的 `sampleMimeType`，才能分清「音轨失败」与「视频失败」，不让阶梯抢走视频侧的兜底。注意 `AnalyticsListener` 在 1.7 已**没有** `DecoderInfo` / `onDecoderInitError`，不能当判据。
+- **单调 + 封顶**：只往前走（CAP → FORCE → MUTE），失败过的 mime 记进 `triedMimes` 不再重试，最多 3 跳；阶梯耗尽才交给既有的「硬解 → FFmpeg 软解优先档」兜底。
+- **换档要带过去**：换解码档位 = 换 ExoPlayer 实例 = `trackSelectionParameters` 归零，所以 `AudioFallbackState.restoreOn()` 在 `LaunchedEffect(playUrl, controller)` 里把已生效的声道上限/禁音重新挂上。`TrackSelectionOverride` 故意不带过去 —— 它的 key 是 `TrackGroup` **实例**，新实例上多半已是另一个对象。
+- **文案分流**：阶梯走到静音仍失败 → 说「音轨处理不了，建议把音轨换成 AAC 立体声」，不再把「换 H.264 源」套在只是音轨坏掉的片源上（`PlayerError.kt` 的 `classifyPlaybackError(error, audioTrackFailure)`）。
+- **已知边界**：MKV 的轨名拿不到 —— `MatroskaExtractor` 把 Track 的 NAME 只存在自己的 `Track.name`，不写进 `Format.label`，所以换轨提示走通用文案。
+
+**归因留痕**：logcat 过滤 `PlayerScreen`（TV：`TvPlayerScreen`）的「音轨解码失败 mime=… → 阶梯 …（第 N 跳）」一行，就能把 §3 那张至今空着的机型矩阵按「mime → 命中哪一跳」填成实测表。
+
+**单测**：`app/src/test/java/com/hypermux/mobile/ui/player/AudioFallbackTest.kt` 10 条（DDP+AAC 必须走 CAP、DTS 单轨直接静音、阶梯耗尽不再给下一步、声道数未知算立体声、换集复位、换档恢复参数）。为让 JVM 单测能构造 Media3 的 `Format` / `TrackGroup`（其构造会路过 `android.text.TextUtils` 桩方法），`app/build.gradle.kts` 开 `unitTests.isReturnDefaultValues = true`。
+
+**验收口径**：本片在**无杜比解码**的手机/盒子上应「有画面 + 有立体声」；在带 Dolby 授权的盒子上阶梯不触发、保持 DDP；DTS-only MKV 仍是静音保画面（不回归）；纯 AAC 片源零额外 `prepare()`。
 
 

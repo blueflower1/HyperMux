@@ -1,6 +1,7 @@
 package com.hypermux.mobile.ui.player
 
 import android.content.Context
+import android.os.Handler
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSourceFactory
@@ -11,6 +12,10 @@ import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import com.hypermux.mobile.data.cache.MediaCacheManager
@@ -20,6 +25,12 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
  * ExoPlayer 装配（§6.1）：MKV/Matroska + MP4 + HLS 核心库自带；
  * ±10s 快进退；缓冲 15s~50s；音频变噪自动暂停。
  * 单实例：同 Activity 内切集 = 换 MediaItem，不重建（§6.7）。
+ *
+ * 两种解码档位（[preferSoftwareDecode]）：
+ * - `false`（默认）：**硬解优先** —— 只把硬件解码器喂给 MediaCodec 渲染器，无硬解时落到 FFmpeg 扩展渲染器；
+ * - `true`：**FFmpeg 软解优先** —— 扩展渲染器排在 MediaCodec 之前，任何片源都先走 FFmpeg，
+ *   FFmpeg 解不了的再由平台解码器（含 `c2.android.*` 软解）兜底。
+ *   这一档是给「有硬解但解不了这一路码流」的机型准备的第二跳，见 [PlayerScreen] 的硬解失败自动兜底。
  *
  * 数据源按"源类型"二选一（§6.2 + 离线播放）：
  * - **网络**：[networkDataSourceFactory]，请求头（Referer 等由播放直链接口下发）通过
@@ -33,7 +44,9 @@ import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 @OptIn(UnstableApi::class)
 class PlayerController(
     context: Context,
-    cacheManager: MediaCacheManager
+    cacheManager: MediaCacheManager,
+    /** true = FFmpeg 软解优先档（硬解失败后的兜底档，需要重建播放器才能切换） */
+    private val preferSoftwareDecode: Boolean = false
 ) {
 
     private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -75,15 +88,33 @@ class PlayerController(
      * ③ [DefaultRenderersFactory.setExtensionRendererMode] = EXTENSION_RENDERER_MODE_ON：
      *    用 [NextRenderersFactory]（NextLib 的预编译 FFmpeg 解码扩展，`DefaultRenderersFactory` 子类）
      *    追加 FfmpegAudioRenderer / FfmpegVideoRenderer。
-     *    **必须保持 ON，绝对不能改成 PREFER**：PREFER 会把所有片源都抢去跑 FFmpeg 软解（连有硬解的也抢），
+     *    **默认档必须保持 ON，绝对不能改成 PREFER**：PREFER 会把所有片源都抢去跑 FFmpeg 软解（连有硬解的也抢），
      *    只有在"平台无可用解码器"时才由 ON 交给 FFmpeg，才符合上面的优先级。
      *    覆盖范围：系统无硬解的视频（模拟器/电视盒子上的 HEVC、AV1 等）与音轨（DTS、DTS-HD、TrueHD 等）。
      *    注意 ①②仍然生效（NextRenderersFactory 继承自 DefaultRenderersFactory，两个 setter 照常链式调用）。
+     * ④ [preferSoftwareDecode] = true 时反过来：selector 用平台默认（硬解 + 软解全量候选）、
+     *    扩展模式用 PREFER（FFmpeg 抢在 MediaCodec 之前）。为什么需要这一档：
+     *    ON 档下只要设备**声明**了某个硬解，MediaCodec 渲染器就认为自己能解，FFmpeg 永远轮不到；
+     *    而厂商硬解常见"谎报能力"（只支持 8-bit Main、或有分辨率/帧率上限），此时 ① 的 fallback
+     *    只能在硬解候选里打转 → 整片报 DECODING_FAILED。换到 PREFER 档才真正把 FFmpeg 顶上来。
+     *    PREFER 只允许作用在**视频**上：[SoftwareFirstVideoRenderersFactory] 把音频的扩展模式强制降回 ON，
+     *    否则连普通 AAC 都会被抢去跑 FfmpegAudioRenderer（实测在该音轨上 `swr_init` 失败 → 整片报错）。
      */
-    private val renderersFactory = NextRenderersFactory(context)
-        .setEnableDecoderFallback(true)
-        .setMediaCodecSelector(HardwareOnlyCodecSelector)
-        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+    private val renderersFactory =
+        (if (preferSoftwareDecode) SoftwareFirstVideoRenderersFactory(context) else NextRenderersFactory(context))
+            .setEnableDecoderFallback(true)
+            .setMediaCodecSelector(
+                if (preferSoftwareDecode) MediaCodecSelector.DEFAULT else HardwareOnlyCodecSelector
+            )
+            .setExtensionRendererMode(
+                if (preferSoftwareDecode)
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                else
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+            )
+
+    /** 当前实例处于哪一档（UI 侧据此决定"重试"该怎么走，也用于日志） */
+    val isSoftwareDecodePreferred: Boolean get() = preferSoftwareDecode
 
     val player: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
         .setMediaSourceFactory(networkMediaSourceFactory)
@@ -125,5 +156,40 @@ class PlayerController(
 
     fun release() {
         player.release()
+    }
+}
+
+/**
+ * 软解优先档专用的 renderers 工厂：视频沿用调用方设定的扩展模式（PREFER，FFmpeg 抢在 MediaCodec 之前），
+ * 但**音频的扩展模式在这里被强制降回 ON**（平台解码器优先，FFmpeg 只兜底平台解不了的音轨）。
+ *
+ * 为什么必须这么做：`setExtensionRendererMode(PREFER)` 是全局的，会把音频渲染器也一起顶到前面，
+ * 于是连普通 AAC 音轨都会交给 FfmpegAudioRenderer；实测 NextLib 的 FFmpeg 音频解码器在
+ * `channelCount` 未设的 AAC 上 `swr_init: Invalid argument` 直接失败，整片报 DECODING_FAILED。
+ * 视频需要 PREFER 才能压过"谎报能力"的厂商硬解，音频不需要、而且有害。
+ */
+@OptIn(UnstableApi::class)
+private class SoftwareFirstVideoRenderersFactory(context: Context) : NextRenderersFactory(context) {
+
+    override fun buildAudioRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        audioSink: AudioSink,
+        handler: Handler,
+        eventListener: AudioRendererEventListener,
+        out: ArrayList<Renderer>
+    ) {
+        super.buildAudioRenderers(
+            context,
+            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON,
+            mediaCodecSelector,
+            enableDecoderFallback,
+            audioSink,
+            handler,
+            eventListener,
+            out
+        )
     }
 }

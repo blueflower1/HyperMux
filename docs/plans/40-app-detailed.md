@@ -333,10 +333,28 @@ Activity onStop → if(isPlaying) pause() + 上报；onDestroy → release()
 |---|---|---|
 | IOException / 408 超时 | 网络或资源速度较慢 | 4s 后自动重试 ×1（同集同断点） |
 | HTTP 4xx（403/404） | 链接不可用（可能失效） | 不重试；按钮：手动重试 / 返回剧集列表 |
-| MediaCodec/不支持流错误码 | 该格式设备不支持（HEVC/10bit?），建议换 H264 源 | 不重试；按钮：返回剧集列表 |
+| MediaCodec/不支持流错误码 | 硬解与软件解码都失败：当前设备硬解和软件解码都处理不了该片源（AV1 / HEVC / 10bit 等），建议换 H264 源 | **先自动换软解档重试一次**（见 §7.5.1），仍失败才不重试 |
 | 其他 | 播放出错了 | 自动 ×1 → 手动 |
 
 - 错误时保持黑屏+居中面板（不 release player 以保留重试上下文，重试成功即恢复）。
+
+#### 7.5.1 解码优先级与「硬解失败自动换软解」兜底（TV 盒子尤其需要）
+
+`PlayerController` 的 renderers 工厂有两档，由构造参数 `preferSoftwareDecode` 决定：
+
+| 档 | MediaCodecSelector | ExtensionRendererMode | 语义 |
+|---|---|---|---|
+| 硬解优先（默认） | `HardwareOnlyCodecSelector`（只返回硬解） | `ON` | 有硬解走硬解；**平台完全无硬解**时 MediaCodec 渲染器声明不支持 → 落到 NextLib 的 FFmpeg 渲染器 |
+| 软解优先（兜底） | `MediaCodecSelector.DEFAULT`（硬解 + 平台软解全量候选） | `PREFER` | FFmpeg 抢在 MediaCodec 之前，任何片源都先试软解 |
+
+为什么必须有第二档：默认档下只要设备**声明**了某个硬解，`MediaCodecRenderer` 就认为自己能解，FFmpeg 扩展渲染器永远轮不到；而盒子上的厂商硬解常见"谎报能力"（只支持 8-bit Main profile、或有分辨率/帧率上限），此时 `setEnableDecoderFallback(true)` 只能在硬解候选里打转 → 整片直接报 `DECODING_FAILED` / `DECODING_FORMAT_EXCEEDS_CAPABILITIES`。
+
+两条硬规则（模拟器实测得出，与手机端 §6.5.1 同一份结论）：
+
+1. **`HardwareOnlyCodecSelector` 只作用于视频 mime**：对 `audio/` 前缀直接返回平台默认候选。实测反例——只有 `c2.android.aac.decoder`（软解）的设备上，本 selector 把音频软解也剔除 → `MediaCodecAudioRenderer` 声明不支持 → `FfmpegAudioRenderer` 接手**普通 AAC** → `ffmpeg_jni: Error in swr_init: Invalid argument`（该 `Format` 的 `channelCount` 未设）→ 整片 `DECODING_FAILED`。盒子上"没有硬 AAC 解码器"比手机更常见，这条对 TV 端尤其关键。
+2. **`PREFER` 只允许作用在视频上**：`setExtensionRendererMode()` 是全局的，会把音频渲染器一起顶到前面，同样踩第 1 条坑。所以软解优先档用 `SoftwareFirstVideoRenderersFactory`（`NextRenderersFactory` 子类）覆盖 `buildAudioRenderers`，把音频的扩展模式强制降回 `ON`。覆盖签名（media3 1.7.1，javap 核对）：`buildAudioRenderers(Context, Int, MediaCodecSelector, Boolean, AudioSink, Handler, AudioRendererEventListener, ArrayList<Renderer>)`。
+
+流程与手机端 §6.5.1 完全一致：解码类错误 → 先走"禁音轨重试一次" → 仍失败则 `switchToSoftwareDecode()` 记下位置、上报断点、换软解优先档重建 `PlayerController`、重新装配同一 URL、`STATE_READY` 后 seek 回原位置并提示「硬解失败，已改用软件解码重试」；只切一次，软解也失败才落错误面板。换档即换 ExoPlayer 实例，所以监听器 / 进度轮询 / 断点上报 / 倍速这些长生命周期 effect 都以 `controller` 为 key。
 
 ### 7.6 性能保护
 

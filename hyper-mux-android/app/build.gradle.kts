@@ -29,8 +29,8 @@ android {
         applicationId = "com.hypermux.mobile"
         minSdk = 24
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.1.14"
+        versionCode = 114
+        versionName = "1.1.2"
 
         // 留空 = 首次启动引导填写；可用 -PhypermuxApiBase=http://host:port 在构建期预置
         buildConfigField("String", "API_BASE", "\"${(rootProject.findProperty("hypermuxApiBase") ?: "")}\"")
@@ -78,6 +78,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    testOptions {
+        // AudioFallbackTest 直接构造 Media3 的 Format/TrackGroup：这类构造会路过 android.jar 的桩方法
+        // （如 TextUtils.isEmpty），让它返回默认值而不是抛 "not mocked"，纯 JVM 单测才能跑起来
+        unitTests.isReturnDefaultValues = true
+    }
     buildFeatures {
         compose = true
         buildConfig = true

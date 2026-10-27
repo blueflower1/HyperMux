@@ -25,8 +25,13 @@ data class ClassifiedError(
     val autoRetry: Boolean
 )
 
-/** 播放错误分类（§6.5） */
-fun classifyPlaybackError(error: PlaybackException): ClassifiedError {
+/**
+ * 播放错误分类（§6.5）。
+ *
+ * [audioTrackFailure] = 音轨阶梯已经走到静音、这一轮仍失败：文案要落在音轨上（换成 AAC 立体声），
+ * 而不是把"设备解不了视频（AV1/HEVC）"的结论套到一个只是音轨坏掉的片源上。
+ */
+fun classifyPlaybackError(error: PlaybackException, audioTrackFailure: Boolean = false): ClassifiedError {
     val code = error.errorCode
     return when (code) {
         PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
@@ -38,13 +43,26 @@ fun classifyPlaybackError(error: PlaybackException): ClassifiedError {
         PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
-        PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
-            ClassifiedError(
-                PlayerErrorKind.DECODE,
-                "当前设备无法解码该片源（AV1 / HEVC / 10bit 等），" +
-                    "建议在后台把片源换成 H.264（avc）",
-                autoRetry = false
-            )
+        PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+        PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+        PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_INIT_FAILED,
+        PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED ->
+            if (audioTrackFailure) {
+                ClassifiedError(
+                    PlayerErrorKind.DECODE,
+                    "当前设备硬解和软件解码都处理不了该片源的音轨（DTS / 杜比 DDP 等），" +
+                        "建议在后台把音轨换成 AAC 立体声",
+                    autoRetry = false
+                )
+            } else {
+                ClassifiedError(
+                    PlayerErrorKind.DECODE,
+                    "当前设备硬解和软件解码都处理不了该片源（AV1 / HEVC / 10bit 等），" +
+                        "建议在后台把片源换成 H.264（avc）",
+                    autoRetry = false
+                )
+            }
 
         PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
         PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,

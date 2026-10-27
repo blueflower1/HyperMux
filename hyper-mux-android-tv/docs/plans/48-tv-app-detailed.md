@@ -559,6 +559,7 @@ TV 端**永远全屏横屏**，无竖屏/全屏切换。
 
 - 连播角标 1.5s（"即将播放下一集：第 7 集"），期间任意键可取消；先 `finish` 再 `next`；末集只 `finish` 不 `next`。
 - 错误分类（网络/HTTP4xx/解码/其他）+ 自动重试 ×1（4s）+ 首帧看门狗 + 软解提示，**全部平移**。
+- 1.1.2 起追加**音轨回退阶梯**（`ui/player/AudioFallback.kt`，与手机端同一份镜像逻辑）：声道上限 → 指定另一条安全音轨 → 静音保画面，最多 3 跳；盒子没有杜比/DTS 硬解时不再一步静音。TV 侧提示走顶部 `CaptionCapsule`（原来静音 fallback 连提示都没有，用户只能误判成"片源坏了"），归因日志 tag `TvPlayerScreen`。
 
 ---
 
@@ -713,6 +714,7 @@ TV 端**永远全屏横屏**，无竖屏/全屏切换。
 | Compose API 位置与直觉不符（易踩坑） | 误判"没有这个 API"→ 绕路自研 | 经验：`Modifier.drawOutline` 在 **`androidx.compose.ui.graphics`**（不是 `...graphics.drawscope`）；`Modifier.focusGroup()` 在 `androidx.compose.foundation`；`focusRestorer` 需 `@OptIn(ExperimentalComposeUiApi::class)`；`Key.nativeKeyCode` 挂在 `Key` 上。定位手段：从 Gradle 缓存解包 AAR，用 `javap` 确认类与方法所在包 |
 | 遥控器文本输入体验差 | 登录/搜索难用 | 自绘字符键盘 + 硬件键盘自动识别；服务器地址可构建期预置（减少手输） |
 | 盒子软解兼容（HEVC/10bit/AV1） | 播放卡顿/黑屏 | 保留 `nextlib-media3ext` FFmpeg 兜底 + 首帧看门狗 + 错误分类文案指引换 H264 源 |
+| 默认音轨是 DDP / DTS 而盒子无对应硬解（WEB-DL MKV 常见） | 整片失败，或旧逻辑一步静音后"有画面没声音" | 1.1.2 起走音轨回退阶梯（声道上限 → 指定安全音轨 → 才静音，见 §9.6）；仍解不了才提示换 AAC 音轨 |
 | 盒子存储小 | 下载不可用 | 下载目录优先外置/USB，无则隐藏入口；下载整体降级为可选（T5） |
 | 大屏性能（低端盒 GPU 弱） | 动画掉帧 | 裁掉圆形揭示等重绘动画；渐变 Brush/Shader 一律 `remember` 复用（沿用手机端第六轮优化）；卡片懒加载 |
 | 分辨率/DPI 差异大 | 布局错位/文字过大过小 | 固定 `sp` 规格 + 安全区 48dp + `BoxWithConstraints` 响应式列数（1080p 5~6 列 / 4K 放宽） |
