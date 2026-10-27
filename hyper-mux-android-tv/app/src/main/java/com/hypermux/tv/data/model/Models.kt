@@ -235,3 +235,81 @@ data class UpdateInfo(
     val releaseNotes: String? = null,
     val mandatory: Boolean = false
 )
+
+// ---------- 远程投屏与设备（契约 §3.13，计划书 80-cast-detailed.md） ----------
+
+/** POST /api/app/devices/register（TV 在登录成功与每次启动时注册自己） */
+data class CastRegisterReq(
+    val deviceId: String,
+    val platform: String,
+    val deviceName: String? = null
+)
+
+data class CastDeviceIdVo(
+    val deviceId: String
+)
+
+/** GET /api/app/devices：同账号设备（「我的」页展示本机与其它端） */
+data class CastDeviceVo(
+    val deviceId: String,
+    val platform: String,
+    val deviceName: String? = null,
+    val online: Boolean = false,
+    val lastSeen: Long = 0L,
+    val casting: Boolean = false
+)
+
+/** GET /api/app/cast/poll 的 pending 载荷：TV 确认弹窗直接渲染它，不需要再查详情 */
+data class CastPendingVo(
+    val id: Long,
+    val senderDeviceId: String? = null,
+    val senderName: String? = null,
+    val movieId: Long = 0L,
+    val videoId: Long = 0L,
+    val movieTitle: String? = null,
+    val episodeLabel: String? = null,
+    val coverUrl: String? = null,
+    val positionMs: Long = 0L,
+    val expireTime: Long = 0L,
+    val confirmSeconds: Int = 6
+)
+
+/**
+ * GET /api/app/cast/poll 的应答。
+ * cancelledIds = 该设备最近被取消/被接管的投屏 id（一次性下发）：
+ * 弹窗正显示该 id → 关闭；正在播放该请求带来的集 → 停止播放回上一页。
+ */
+data class CastPollVo(
+    val pending: CastPendingVo? = null,
+    val cancelledIds: List<Long> = emptyList(),
+    val confirmSeconds: Int = 6
+)
+
+/** POST /api/app/cast/accept */
+data class CastAcceptReq(
+    val id: Long,
+    val reason: String? = null
+)
+
+data class CastAcceptedVo(
+    val id: Long,
+    val movieId: Long = 0L,
+    val videoId: Long = 0L,
+    val positionMs: Long = 0L,
+    val movieTitle: String? = null,
+    val episodeLabel: String? = null
+)
+
+/** POST /api/app/cast/reject 与 /cancel */
+data class CastIdReq(
+    val id: Long,
+    val reason: String? = null
+)
+
+/** GET /api/app/cast/config */
+data class CastConfigVo(
+    val enabled: Boolean = true,
+    val confirmSeconds: Int = 6,
+    val requestTtlSeconds: Long = 15L,
+    val pollIntervalMs: Long = 2000L
+)

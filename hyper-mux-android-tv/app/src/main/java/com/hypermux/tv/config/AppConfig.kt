@@ -50,4 +50,12 @@ object AppConfig {
 
     /** 启动主动检查更新的节流间隔：距上次成功检查 24h 内不再主动查（手动检查不受限） */
     const val UPDATE_CHECK_INTERVAL_MS = 24 * 3600_000L
+
+    // ---- 远程投屏（契约 §3.13，计划书 80-cast-detailed.md）----
+
+    /** TV 轮询服务端取投屏请求的间隔（与扫码登录的 2s 轮询同构） */
+    const val CAST_POLL_INTERVAL_MS = 2_000L
+
+    /** 投屏确认弹窗默认倒计时（服务端 cast/config 下发 confirmSeconds 时以其为准） */
+    const val CAST_CONFIRM_COUNTDOWN_S = 6
 }

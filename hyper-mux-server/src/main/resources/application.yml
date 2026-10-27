@@ -75,4 +75,12 @@ hypermux:
   metadata:
     connect-timeout-ms: 5000
     read-timeout-ms: 15000
+  # 远程投屏（M7）：enabled / confirm-seconds 可被管理后台「系统设置」覆盖（sys_config，改完即时生效不用重启）
+  cast:
+    enabled: ${HYPERMUX_CAST_ENABLED:true}
+    request-ttl: 15s          # 投屏请求有效期；过期判定只认落库 expire_time
+    accepted-ttl: 3h          # ACCEPTED 记录兜底置 CLOSED 的时长（不通知 TV 停播）
+    confirm-seconds: 6        # TV 确认弹窗倒计时（管理后台可配 3~15）
+    poll-min-interval-ms: 1000  # 同一设备两次 poll 的最小间隔护栏
+    notify-window: 2m         # cancelledIds 下发窗口
   static-dirs: ${HYPERMUX_STATIC_DIRS:}

@@ -1,6 +1,7 @@
 # 10 · 数据模型详细设计（PostgreSQL）
 
-> 隶属：[PLAN.md](../../PLAN.md) §3 的落地版 · 版本 v1.2 · 对应里程碑：M0 建库 / M1 主链路 / M4'（2026-10-11）
+> 隶属：[PLAN.md](../../PLAN.md) §3 的落地版 · 版本 v1.3 · 对应里程碑：M0 建库 / M1 主链路 / M4'（2026-10-11）/ **M7 投屏（2026-10-22）**
+> **v1.3（M7 投屏）**：新增 `user_device`（账号设备注册表）与 `cast_request`（投屏请求，单并发靠部分唯一索引兜底）；详细设计见 [80-cast-detailed.md](./80-cast-detailed.md)。设备"在线"状态**不落库**（内存 Caffeine 判定），`user_device.last_seen` 仅供展示且落库节流 30s。
 > **v1.2（v3）**：`pool`（影片池）→ `category`（影视类型，可自定义）；`movie.pool_id` → `movie.category_id`（每片归属一个类型，TV 首页按键分区）；唯一索引 `uk_movie_pool_title/idx_movie_pool_status` → `uk_movie_category_title/idx_movie_category_status`。迁移见 schema（幂等）。
 > **v1.1（v2 定位调整）**：`openlist_source` 移除刮削配置列；删除 `scrape_task` 表；`movie` 移除 `scrape_assets` 列与 `uk_movie_source_path` 索引；新增 `sys_config`（键值对：元数据来源 + TMDB Key）。
 > 约定：库名 `hypermux`；时区一律 `timestamptz`；JSON 字段一律毫秒时间戳（给客户端用）。
@@ -19,6 +20,8 @@
 | `play_progress` | 断点续播 + 历史 | TV 端上报（upsert） | 随 user 或 video 级联 |
 | `openlist_source` | OpenList 源配置（刮削入口） | 后台手工 | 有关联影片时禁止硬删（置停用） |
 | `scrape_task` | 刮削任务（观测/停止） | 引擎自动 | 随 source 级联；历史保留 |
+| `user_device` | **账号设备**（投屏目标注册表，v1.3 新增） | 客户端登录时自注册（upsert） | 随 user 级联 |
+| `cast_request` | **投屏请求**（手机→TV 一次性投送，v1.3 新增） | 手机端发起、TV 端确认 | 随 user 级联；历史保留 |
 
 ```mermaid
 erDiagram
@@ -31,6 +34,8 @@ erDiagram
   video ||--o{ play_progress : "video_id"
   openlist_source ||--o{ movie : "source_id(SCRAPE)"
   openlist_source ||--o{ scrape_task : "source_id"
+  sys_user ||--o{ user_device : "user_id"
+  sys_user ||--o{ cast_request : "user_id(单并发:每账号≤1条PENDING)"
 ```
 
 ---
@@ -199,6 +204,51 @@ CREATE TABLE IF NOT EXISTS scrape_task (
   CONSTRAINT ck_task_status CHECK (status IN ('RUNNING','STOPPING','FINISHED','FAILED','STOPPED'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_source ON scrape_task (source_id, start_time DESC);
+
+-- ============ 账号设备（v1.3 · M7 投屏） ============
+CREATE TABLE IF NOT EXISTS user_device (
+  id          bigserial   PRIMARY KEY,
+  user_id     int8 NOT NULL REFERENCES sys_user(id) ON DELETE CASCADE,
+  device_id   varchar(64) NOT NULL,               -- 客户端安装级 UUID（卸载重装即新 id）
+  platform    varchar(16) NOT NULL,               -- mobile / tv / web / windows（与 app_release 平台口径一致）
+  device_name varchar(64),                        -- 客户端上报，服务端截断 64 + 清洗控制字符
+  last_seen   timestamptz,                        -- 仅供"上次在线"展示；在线与否由内存 Caffeine 判定
+  create_time timestamptz NOT NULL DEFAULT now(),
+  update_time timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_device_user_device UNIQUE (user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_user ON user_device (user_id, platform);
+
+-- ============ 投屏请求（v1.3 · M7 投屏，单并发） ============
+CREATE TABLE IF NOT EXISTS cast_request (
+  id               bigserial   PRIMARY KEY,
+  user_id          int8 NOT NULL REFERENCES sys_user(id) ON DELETE CASCADE,
+  sender_device_id varchar(64) NOT NULL,
+  target_device_id varchar(64) NOT NULL,
+  sender_name      varchar(64),
+  target_name      varchar(64),
+  movie_id         int8 NOT NULL,
+  video_id         int8 NOT NULL,
+  movie_title      varchar(191) NOT NULL,         -- 发起时快照：TV 弹窗直接用，不再多跑一次接口
+  episode_label    varchar(64),                   -- video.title 或 "第N集"
+  cover_url        text,
+  position_ms      int8 NOT NULL DEFAULT 0,       -- 手机当前进度；从详情页发起则取服务端断点或 0
+  status           varchar(16) NOT NULL DEFAULT 'PENDING',
+      -- PENDING / ACCEPTED / REJECTED / EXPIRED / CANCELLED / CLOSED
+  expire_time      timestamptz NOT NULL,          -- create_time + request-ttl（15s）；过期判定只认这一列
+  decided_time     timestamptz,
+  closed_time      timestamptz,
+  notified_at      timestamptz,                   -- cancelledIds 已下发给目标 TV 的时刻（一次性下发，置了就不再重复发）
+  end_reason       varchar(32),                   -- user-yes / countdown / user-no / sender-cancel / preempted / timeout / tv-exit / idle
+  create_time      timestamptz NOT NULL DEFAULT now(),
+  update_time      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_cast_status CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED','CANCELLED','CLOSED'))
+);
+-- 单并发铁律：每账号同时最多 1 条 PENDING（部分唯一索引，DB 兜底，服务层先做抢占）
+CREATE UNIQUE INDEX IF NOT EXISTS uk_cast_pending_user ON cast_request (user_id) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_cast_target_status ON cast_request (target_device_id, status, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_cast_user_time     ON cast_request (user_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_cast_notify        ON cast_request (target_device_id, notified_at);
 ```
 
 > `openlist_source` 必须先于 `movie` 存在（`movie.source_id` 引用它）。PostgreSQL 允许引用后创建的表（建表时 FK 只做存在性登记，引用目标不存在会报错）——**故 schema.sql 中 `openlist_source` 段落要放在 `movie` 之前执行**，上面 DDL 顺序即执行顺序（`movie.source_id` 那段注释后已调整：实际写入文件时把 `openlist_source` 表放在 `movie` 之前）。
@@ -252,6 +302,8 @@ DRAFT 忽略（DELETE）：仅 DRAFT 允许直接删（候选放弃）
 | 剧集全量替换 | 事务内：`DELETE FROM video WHERE movie_id=? AND id NOT IN (...)` 再 upsert 列表 |
 | 标签替换 | 事务内 delete movie_tag 再批量 insert |
 | 同池重名校验 | 先查后插 + `uk_movie_pool_title` 兜底（捕获 23505 → 409） |
+| 设备注册（高频） | `INSERT ... ON CONFLICT (user_id,device_id) DO UPDATE SET platform/device_name/last_seen/update_time`（MyBatis-Plus 侧先查后写亦可，冲突由唯一约束兜底） |
+| 投屏单并发 | 服务层先 `closeActive(user_id,'preempted')` 再插 PENDING；并发撞 `uk_cast_pending_user` → 23505 → 409 |
 
 ---
 
@@ -289,6 +341,7 @@ ON CONFLICT (name) DO NOTHING;
 5. **`openlist_source` 不硬删**：已有关联影片时置 `status=0`（停用），避免 `movie.source_id ON DELETE SET NULL` 造成"播放时找不到 OpenList 地址"。
 6. **无 Redis**：单进程 + Caffeine 足够（见 20-backend §9）；断点 upsert 靠唯一约束无锁。
 7. **时间戳**：库内 `timestamptz`；API 层统一毫秒 `long`（TV 端直接用，不做时区换算）。
+8. **投屏请求落库、设备在线不落库**（v1.3）：`cast_request` 必须落库——它既是 TV/手机两端的唯一状态源，也是"单并发"这条业务铁律的强制点（部分唯一索引比应用层锁可靠），同时给管理后台留审计痕迹。设备"在线"是**秒级易变状态**，落库会让每 2s 一次的 poll 变成写放大，因此只存内存 Caffeine（TTL 30s），`user_device.last_seen` 落库节流 30s 仅供展示。过期判定一律按落库的 `expire_time` 列，不能按"缓存被轮询续期"（扫码登录已踩过这个坑）。
 
 ---
 

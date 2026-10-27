@@ -1,6 +1,14 @@
 package com.hypermux.tv.data.api
 
 import com.hypermux.tv.data.model.ApiResponse
+import com.hypermux.tv.data.model.CastAcceptReq
+import com.hypermux.tv.data.model.CastAcceptedVo
+import com.hypermux.tv.data.model.CastConfigVo
+import com.hypermux.tv.data.model.CastDeviceIdVo
+import com.hypermux.tv.data.model.CastDeviceVo
+import com.hypermux.tv.data.model.CastIdReq
+import com.hypermux.tv.data.model.CastPollVo
+import com.hypermux.tv.data.model.CastRegisterReq
 import com.hypermux.tv.data.model.FinishReq
 import com.hypermux.tv.data.model.FinishVo
 import com.hypermux.tv.data.model.HistoryVo
@@ -105,4 +113,34 @@ interface ApiService {
         @Query("code") code: Int,
         @Query("platform") platform: String
     ): Response<ApiResponse<UpdateInfo>>
+
+    // ---------- 远程投屏与设备（契约 §3.13） ----------
+
+    /** 本机设备注册（幂等 upsert）：登录成功与每次启动恢复会话时调用 */
+    @POST("api/app/devices/register")
+    suspend fun registerDevice(@Body req: CastRegisterReq): ApiResponse<CastDeviceIdVo>
+
+    /** 本账号设备列表（「我的」页展示用） */
+    @GET("api/app/devices")
+    suspend fun castDevices(@Query("platform") platform: String? = null): ApiResponse<List<CastDeviceVo>>
+
+    /** TV 每 2s 轮询：待确认的投屏请求 + 需要停止的投屏 id（顺带即设备在线心跳） */
+    @GET("api/app/cast/poll")
+    suspend fun castPoll(@Query("deviceId") deviceId: String): ApiResponse<CastPollVo>
+
+    /** TV 确认（点「是」或倒计时归零） */
+    @POST("api/app/cast/accept")
+    suspend fun castAccept(@Body req: CastAcceptReq): ApiResponse<CastAcceptedVo>
+
+    /** TV 拒绝（点「否」或按 BACK）。幂等。 */
+    @POST("api/app/cast/reject")
+    suspend fun castReject(@Body req: CastIdReq): ApiResponse<Boolean>
+
+    /** 取消投屏（TV 退出投屏播放页时调用）。幂等。 */
+    @POST("api/app/cast/cancel")
+    suspend fun castCancel(@Body req: CastIdReq): ApiResponse<Boolean>
+
+    /** 投屏配置（开关 / 确认倒计时 / 轮询节奏） */
+    @GET("api/app/cast/config")
+    suspend fun castConfig(): ApiResponse<CastConfigVo>
 }

@@ -21,11 +21,18 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
@@ -44,6 +51,8 @@ import com.hypermux.mobile.ui.downloads.DownloadDetailScreen
 import com.hypermux.mobile.ui.downloads.MyDownloadsScreen
 import com.hypermux.mobile.ui.search.SearchScreen
 import com.hypermux.mobile.ui.scan.ScanScreen
+import com.hypermux.mobile.ui.cast.CastConfirmDialog
+import com.hypermux.mobile.ui.cast.CastViewModel
 import com.hypermux.mobile.ui.movie.MovieDetailScreen
 import com.hypermux.mobile.ui.player.PlayerScreen
 import com.hypermux.mobile.ui.theme.Motion
@@ -167,6 +176,7 @@ fun AppNavigation() {
     val authVm: AuthViewModel = hiltViewModel()
     val session by authVm.session.collectAsStateWithLifecycle(initialValue = null)
     val updateVm: UpdateViewModel = hiltViewModel()
+    val castVm: CastViewModel = hiltViewModel()
 
     // App 自更新（§3.11）：登录后 3s 的"启动空闲"时机做一次被动检查（让位首屏加载；
     // 24h 节流、静默失败、是否弹窗都在 UpdateViewModel 内决策）
@@ -175,6 +185,49 @@ fun AppNavigation() {
             delay(3_000)
             updateVm.autoCheckIfDue()
         }
+    }
+
+    // 投屏（M7，契约 §3.13）：登录态确立即注册本机设备 + 恢复当前投屏状态（重启/切后台回来不丢）
+    LaunchedEffect(session != null) {
+        if (session != null) {
+            castVm.cast.registerSelf()
+            castVm.cast.refreshConfig()
+            castVm.cast.restore()
+        } else {
+            // 登出/会话失效：投送与接收两条线都不把上一账号的状态带过去
+            castVm.clearAll()
+        }
+    }
+
+    // 投屏接收侧（本机当目标端，计划书 80-cast-detailed.md §9.7）：轮询就是这台手机的"在线"心跳。
+    // 只在「已登录 + App 在前台」时跑 —— 退到后台还继续轮询会把手机一直标成在线，
+    // 别的设备就能投到一个没人看的屏幕上（与 TV 端「退到后台立刻停」同一口径）。
+    val navLifecycle = LocalLifecycleOwner.current
+    var appInForeground by remember { mutableStateOf(true) }
+    DisposableEffect(navLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> appInForeground = true
+                Lifecycle.Event.ON_STOP -> appInForeground = false
+                else -> Unit
+            }
+        }
+        navLifecycle.lifecycle.addObserver(observer)
+        onDispose {
+            navLifecycle.lifecycle.removeObserver(observer)
+            appInForeground = false
+        }
+    }
+    LaunchedEffect(session != null, appInForeground) {
+        if (session != null && appInForeground) castVm.startReceiver() else castVm.stopReceiver()
+    }
+
+    // 接受投屏 → 拉起播放页（起播位置由 CastReceiver 的 startHint 交给 PlayerViewModel 取用）
+    val castLaunch by castVm.incomingLaunch.collectAsStateWithLifecycle(initialValue = null)
+    LaunchedEffect(castLaunch) {
+        val l = castLaunch ?: return@LaunchedEffect
+        castVm.consumeIncomingLaunch()
+        navController.navigatePlay(l.movieId, l.videoId)
     }
 
     val updateInfo by updateVm.dialog.collectAsStateWithLifecycle(initialValue = null)
@@ -399,5 +452,27 @@ fun AppNavigation() {
                 }
             }
         )
+    }
+
+    // 投屏确认弹窗挂在窗口层（不受 NavHost 影响）：投屏可能落在任何页面（首页 / 影片页 / 播放页），
+    // 与 TV 端把弹窗挂导航窗口层同一思路。默认「是」，倒计时归零自动起播。
+    val castPending by castVm.incomingPending.collectAsStateWithLifecycle(initialValue = null)
+    val castConfirmSeconds by castVm.confirmSeconds.collectAsStateWithLifecycle()
+    castPending?.let { p ->
+        CastConfirmDialog(
+            pending = p,
+            confirmSeconds = castConfirmSeconds,
+            onAccept = { castVm.acceptIncoming(it) },
+            onReject = { castVm.rejectIncoming() }
+        )
+    }
+
+    // 接收侧的一句话提示（发起端取消 / 被同账号其它设备接管）：页面无关，直接 Toast
+    val navContext = LocalContext.current
+    val castNotice by castVm.incomingNotice.collectAsStateWithLifecycle(initialValue = null)
+    LaunchedEffect(castNotice) {
+        val n = castNotice ?: return@LaunchedEffect
+        castVm.consumeIncomingNotice()
+        Toast.makeText(navContext, n, Toast.LENGTH_LONG).show()
     }
 }

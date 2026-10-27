@@ -90,7 +90,8 @@ public final class AdminVos {
     public record ImageCandidateVo(String url, String label, Integer width, Integer height) {
     }
 
-    public record SettingsVo(String metadataProvider, String tmdbApiKey) {
+    public record SettingsVo(String metadataProvider, String tmdbApiKey,
+                             Boolean castEnabled, Integer castConfirmSeconds) {
     }
 
     public record ImportErrorVo(int line, String msg) {
@@ -184,7 +185,8 @@ public final class AdminVos {
     public record ImportFolderReq(Long sourceId, String path) {
     }
 
-    public record SettingsUpdateReq(String metadataProvider, String tmdbApiKey) {
+    public record SettingsUpdateReq(String metadataProvider, String tmdbApiKey,
+                                    Boolean castEnabled, Integer castConfirmSeconds) {
     }
 
     public record ScrapeImagesBatchReq(List<Long> ids, Boolean onlyMissing, String provider) {

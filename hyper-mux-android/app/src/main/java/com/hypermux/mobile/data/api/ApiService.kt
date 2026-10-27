@@ -1,6 +1,18 @@
 package com.hypermux.mobile.data.api
 
 import com.hypermux.mobile.data.model.ApiResponse
+import com.hypermux.mobile.data.model.CastAcceptReq
+import com.hypermux.mobile.data.model.CastAcceptedVo
+import com.hypermux.mobile.data.model.CastConfigVo
+import com.hypermux.mobile.data.model.CastCurrentVo
+import com.hypermux.mobile.data.model.CastDeviceIdVo
+import com.hypermux.mobile.data.model.CastDeviceVo
+import com.hypermux.mobile.data.model.CastIdReq
+import com.hypermux.mobile.data.model.CastPollVo
+import com.hypermux.mobile.data.model.CastRegisterReq
+import com.hypermux.mobile.data.model.CastRequestedVo
+import com.hypermux.mobile.data.model.CastRequestReq
+import com.hypermux.mobile.data.model.CastStatusVo
 import com.hypermux.mobile.data.model.FinishReq
 import com.hypermux.mobile.data.model.FinishVo
 import com.hypermux.mobile.data.model.HistoryVo
@@ -106,4 +118,51 @@ interface ApiService {
         @Query("code") code: Int,
         @Query("platform") platform: String
     ): Response<ApiResponse<UpdateInfo>>
+
+    // ---------- 远程投屏与设备（契约 §3.13） ----------
+
+    /** 设备注册（幂等 upsert）：登录成功 / 启动恢复会话 / 打开投屏入口时调用 */
+    @POST("api/app/devices/register")
+    suspend fun registerDevice(@Body req: CastRegisterReq): ApiResponse<CastDeviceIdVo>
+
+    /** 同账号设备列表（platform 可空 = 全部） */
+    @GET("api/app/devices")
+    suspend fun castDevices(@Query("platform") platform: String? = null): ApiResponse<List<CastDeviceVo>>
+
+    /** 发起投屏（单并发：新请求抢占旧请求） */
+    @POST("api/app/cast/request")
+    suspend fun castRequest(@Body req: CastRequestReq): ApiResponse<CastRequestedVo>
+
+    /** 投屏结果轮询（每 1s，上限 17s） */
+    @GET("api/app/cast/request/status")
+    suspend fun castStatus(@Query("id") id: Long): ApiResponse<CastStatusVo>
+
+    /** 取消投屏（幂等） */
+    @POST("api/app/cast/cancel")
+    suspend fun castCancel(@Body req: CastIdReq): ApiResponse<Boolean>
+
+    /** 当前投屏（重启/切后台回来恢复状态）：data.active=null 表示没有投屏 */
+    @GET("api/app/cast/current")
+    suspend fun castCurrent(): ApiResponse<CastCurrentVo>
+
+    /** 投屏配置（开关 / 确认倒计时 / 轮询节奏） */
+    @GET("api/app/cast/config")
+    suspend fun castConfig(): ApiResponse<CastConfigVo>
+
+    // ---------- 投屏接收侧（本机当目标端） ----------
+
+    /**
+     * 接收端轮询（每 2s）。这一发同时是"本机在线"心跳：
+     * 服务端 DevicePresenceService 据此把这台手机标成在线，别的设备才允许投过来；停止轮询 30s 后自动离线。
+     */
+    @GET("api/app/cast/poll")
+    suspend fun castPoll(@Query("deviceId") deviceId: String): ApiResponse<CastPollVo>
+
+    /** 接受投屏（reason = user-yes | countdown） */
+    @POST("api/app/cast/accept")
+    suspend fun castAccept(@Body req: CastAcceptReq): ApiResponse<CastAcceptedVo>
+
+    /** 拒绝投屏（幂等，已是终态也返回成功） */
+    @POST("api/app/cast/reject")
+    suspend fun castReject(@Body req: CastIdReq): ApiResponse<Boolean>
 }

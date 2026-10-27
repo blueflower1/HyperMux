@@ -51,7 +51,9 @@ class PlayerViewModel @Inject constructor(
     private val settingsRepo: SettingsRepo,
     private val pendingStore: PendingProgressStore,
     private val progressSync: ProgressSync,
-    val cacheManager: MediaCacheManager
+    val cacheManager: MediaCacheManager,
+    private val castState: com.hypermux.mobile.data.cast.CastState,
+    private val castReceiver: com.hypermux.mobile.data.cast.CastReceiver
 ) : ViewModel() {
 
     val movieId: Long = state.get<Long>("movieId") ?: -1L
@@ -74,6 +76,11 @@ class PlayerViewModel @Inject constructor(
     fun setLastSpeed(v: Float) {
         viewModelScope.launch { settingsRepo.setLastSpeed(v) }
     }
+
+    // ---- 投屏（M7，契约 §3.13）----
+
+    /** 当前生效的投屏：非空 = TV 正在播这一集，手机必须停止本地播放且不再上报断点 */
+    val castActive: StateFlow<com.hypermux.mobile.data.model.CastBriefVo?> = castState.active
 
     // ---- 缓存状态（播放页「缓存」按钮 / 角标） ----
 
@@ -192,6 +199,11 @@ class PlayerViewModel @Inject constructor(
                 } else {
                     0L
                 }
+
+                // 投屏接收：这一集是被投过来的 → 投屏携带的位置优先于本机断点（用完即清，
+                // 下次正常点开仍回到自己的断点）。与网页端 PlayView 的 castPos 同一口径。
+                val castMs = castReceiver.takeCastStartMs(movieId, videoId)
+                if (castMs != null && castMs > 0L) _resumeMs.value = castMs
             }
         }
     }
@@ -291,6 +303,9 @@ class PlayerViewModel @Inject constructor(
      */
     fun reportProgress(positionMs: Long, durationMs: Long, finished: Int? = null) {
         if (positionMs < AppConfig.PROGRESS_MIN_POSITION_MS) return
+        // 投屏闸门（M7）：TV 正在播这一集时手机不再写断点 ——
+        // play_progress 是 (user_id, video_id) 的 upsert，两端同时写会互相把对方覆盖回旧位置。
+        if (castState.isCasting) return
         viewModelScope.launch {
             runCatching {
                 playbackRepo.reportProgress(

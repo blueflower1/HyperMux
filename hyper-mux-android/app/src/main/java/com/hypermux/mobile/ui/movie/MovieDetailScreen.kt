@@ -1,4 +1,4 @@
-﻿package com.hypermux.mobile.ui.movie
+package com.hypermux.mobile.ui.movie
 
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState

@@ -50,4 +50,18 @@ object AppConfig {
 
     /** 启动主动检查更新的节流间隔：距上次成功检查 24h 内不再主动查（手动检查不受限） */
     const val UPDATE_CHECK_INTERVAL_MS = 24 * 3600_000L
+
+    // ---- 远程投屏（契约 §3.13，计划书 80-cast-detailed.md）----
+
+    /** 发起投屏后轮询请求结果的间隔 */
+    const val CAST_POLL_INTERVAL_MS = 1_000L
+
+    /** 轮询上限：服务端 request-ttl 15s + 网络余量（超时即判「目标端未响应」） */
+    const val CAST_POLL_MAX_MS = 17_000L
+
+    /** 接收侧轮询间隔（本机当目标端）：与 TV 端 / 网页端同一节奏，服务端 poll 护栏是 1s */
+    const val CAST_RECEIVE_POLL_MS = 2_000L
+
+    /** 确认弹窗默认倒计时的本地兜底值（服务端 cast/config 拿到就用服务端的，取值 3~15） */
+    const val CAST_CONFIRM_COUNTDOWN_S = 6
 }

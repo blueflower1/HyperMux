@@ -231,3 +231,131 @@ data class UpdateInfo(
     val releaseNotes: String? = null,
     val mandatory: Boolean = false
 )
+
+// ---------- 远程投屏与设备（契约 §3.13，计划书 80-cast-detailed.md） ----------
+
+/** POST /api/app/devices/register */
+data class CastRegisterReq(
+    val deviceId: String,
+    val platform: String,
+    val deviceName: String? = null
+)
+
+data class CastDeviceIdVo(
+    val deviceId: String
+)
+
+/** GET /api/app/devices：同账号设备（online = 最近 30s 内有心跳，服务端内存判定） */
+data class CastDeviceVo(
+    val deviceId: String,
+    val platform: String,
+    val deviceName: String? = null,
+    val online: Boolean = false,
+    val lastSeen: Long = 0L,
+    val casting: Boolean = false
+)
+
+/** POST /api/app/cast/request */
+data class CastRequestReq(
+    val targetDeviceId: String,
+    val senderDeviceId: String,
+    val movieId: Long,
+    val videoId: Long,
+    val positionMs: Long = 0L
+)
+
+data class CastRequestedVo(
+    val requestId: Long,
+    val expiresIn: Long,
+    val targetName: String? = null
+)
+
+/** GET /api/app/cast/request/status（手机每 1s 轮询，上限 17s） */
+data class CastStatusVo(
+    val id: Long,
+    val status: String,
+    val targetName: String? = null,
+    val endReason: String? = null
+)
+
+/** POST /api/app/cast/cancel（reason 可空；手机取消缺省 sender-cancel） */
+data class CastIdReq(
+    val id: Long,
+    val reason: String? = null
+)
+
+/**
+ * GET /api/app/cast/current。
+ * 外层恒非空，"没有投屏"表达为 active=null —— 客户端 safeApiCall 把 data=null 当异常，
+ * 因此服务端不能直接回 null data。
+ */
+data class CastCurrentVo(
+    val active: CastBriefVo? = null
+)
+
+data class CastBriefVo(
+    val id: Long,
+    val status: String,
+    val senderDeviceId: String? = null,
+    val targetDeviceId: String? = null,
+    val senderName: String? = null,
+    val targetName: String? = null,
+    val movieId: Long = 0L,
+    val videoId: Long = 0L,
+    val movieTitle: String? = null,
+    val episodeLabel: String? = null,
+    val coverUrl: String? = null,
+    val positionMs: Long = 0L,
+    val startedTime: Long = 0L
+)
+
+/** GET /api/app/cast/config */
+data class CastConfigVo(
+    val enabled: Boolean = true,
+    val confirmSeconds: Int = 6,
+    val requestTtlSeconds: Long = 15L,
+    val pollIntervalMs: Long = 2000L
+)
+
+// ---------- 投屏接收侧（本机当目标端，计划书 80-cast-detailed.md §9.7） ----------
+
+/** GET /api/app/cast/poll 的 pending 载荷：确认弹窗直接渲染它，不需要再查详情 */
+data class CastPendingVo(
+    val id: Long,
+    val senderDeviceId: String? = null,
+    val senderName: String? = null,
+    val movieId: Long = 0L,
+    val videoId: Long = 0L,
+    val movieTitle: String? = null,
+    val episodeLabel: String? = null,
+    val coverUrl: String? = null,
+    val positionMs: Long = 0L,
+    val expireTime: Long = 0L,
+    val confirmSeconds: Int = 6
+)
+
+/**
+ * GET /api/app/cast/poll 的应答。
+ * cancelledIds = 本机最近被取消/被接管的投屏 id（一次性下发）：
+ * 弹窗正显示该 id → 关闭；正在播放该请求带来的集 → 停止播放回上一页。
+ */
+data class CastPollVo(
+    val pending: CastPendingVo? = null,
+    val cancelledIds: List<Long> = emptyList(),
+    val confirmSeconds: Int = 6
+)
+
+/** POST /api/app/cast/accept（reason = user-yes | countdown） */
+data class CastAcceptReq(
+    val id: Long,
+    val reason: String? = null
+)
+
+data class CastAcceptedVo(
+    val id: Long,
+    val movieId: Long = 0L,
+    val videoId: Long = 0L,
+    val positionMs: Long = 0L,
+    val movieTitle: String? = null,
+    val episodeLabel: String? = null
+)

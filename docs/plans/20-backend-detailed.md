@@ -98,6 +98,8 @@ server/
    │  │              VideoVo | VideoListVo | EpisodeEditReq | VideosReplaceReq
    │  │              VideoImportReq | ImportResult | ReplaceResult | VideoCountRow
    │  ├─ progress/  PlayProgressEntity | ProgressMapper（home 继续看/历史联表 SQL 内置）
+│  ├─ cast/      UserDeviceEntity | UserDeviceMapper | CastRequestEntity | CastRequestMapper
+│  │              CastService | DevicePresenceService | CastSweeper | CastProperties | CastVos   # M7 投屏（见 §17）
    │  ├─ dashboard/ DashboardService | DashboardVo | RecentTaskVo
    │  ├─ scrape/    OpenListSourceEntity | SourceMapper | SourceService
    │  │              OpenListClient（version + fs/list 两步探测/测试连通）
@@ -556,3 +558,35 @@ public interface OpenListClient {
 - D5：CandidateService + 候选 4 接口 + auto_publish 池约定
 - D6：联调（真实目录 200 片）+ 幂等/冲突/停止用例
 - D7：缓冲 + 性能（20000 文件）
+
+---
+
+## 17. 投屏服务（`cast/`，M7 · 2026-10-22）
+
+> 契约见 [30-api-contract §3.13](./30-api-contract.md)，数据模型见 [10-data-model §2](./10-data-model.md)，完整设计（含测试流程与预期结果）见 [80-cast-detailed.md](./80-cast-detailed.md)。
+
+**17.1 组成**
+
+| 类 | 责任 |
+|---|---|
+| `UserDeviceEntity/Mapper` | `user_device` 表；`uk_device_user_device` 幂等 upsert |
+| `CastRequestEntity/Mapper` | `cast_request` 表；`findByIdAndUser` / `findActiveForUser` / `listActiveForUser` / `findPendingForTarget` / `listActiveTargetIds` / `listToNotify` / `expirePending` / `closeStaleAccepted` |
+| `CastProperties` | `@ConfigurationProperties("hypermux.cast")`：`enabled/request-ttl/accepted-ttl/confirm-seconds/poll-min-interval-ms/notify-window` |
+| `DevicePresenceService` | Caffeine `userId:deviceId → lastSeenAt`（TTL 30s）；`touch()`（`last_seen` 落库节流 30s）/ `isOnline()` |
+| `CastService` | 校验链 + 单并发抢占 + `poll` 组装（pending + 一次性 `cancelledIds`） |
+| `CastSweeper` | `@Scheduled(fixedDelay=10_000)`：PENDING 过期 → `EXPIRED(timeout)`；ACCEPTED 超 `accepted-ttl` → `CLOSED(idle)` |
+| `AppDeviceController` / `AppCastController` | `/api/app/devices/**`、`/api/app/cast/**` |
+
+**17.2 后端要点**
+
+- **无新依赖**：轮询模型（TV 2s / 手机 1s），不引入 SSE/WebSocket/Redis；`pom.xml` 与 `WebConfig.java` 零改动，鉴权走现有 `AuthInterceptor`。
+- **在线不落库**：在线 = 内存 Caffeine 命中；`user_device.last_seen` 只是展示字段，且 `touch()` 落库节流 30s（poll 每 2s 一次，不能每 poll 写库）。
+- **过期只认落库列**：`expire_time` 是唯一判据。Caffeine 会被 poll 续期，绝不能拿它判过期（`QrLoginService` 已踩过这个坑，其注释写明了原因）。
+- **单并发两层**：服务层先 `closeActive(user_id,'preempted')` 再插 PENDING；DB 部分唯一索引 `uk_cast_pending_user` 兜底，撞索引 → `DataIntegrityViolationException` → 409。
+- **poll 限频护栏**：同设备两次 poll 间隔 < `poll-min-interval-ms` → 429，防止客户端 bug 把 DB 打爆。
+- **跨账号不泄露**：目标设备查询一律带 `user_id` 条件，查不到就 404 `设备不存在`，不区分"不存在/不属于你"。
+- **运行时开关**：`sys_config.cast_enabled` / `cast_confirm_seconds` 覆盖 yml 默认值（改完即时生效，不用重启）。关闭时 `cast/request` → 409，但 **`cast/poll` 返回 200 + 空 `pending`**：TV 每 2s 轮一次，报错会让它反复弹错误提示。
+- **收尾不外发**：`closeStaleAccepted`（超 `accepted-ttl` 的 `CLOSED/idle`）在 UPDATE 里同时置 `notified_at = now`，使这类服务端自判超时**不会**被下发成 `cancelledIds` —— 否则一台其实还在正常播放的 TV 会收到"停止播放"信号。
+- **不中转视频流**：投屏只传 `movieId/videoId/positionMs`；TV 自己调 `PlayUrlService` 换直链（不复用发送端那份，避免跨端 header/时效错配）。
+
+**17.3 并发与内存边界**：`cast_request` 每账号最多 1 条活跃 + 历史行（无上限，按 `idx_cast_user_time` 分页读）；Caffeine presence 上限 10 万条、TTL 30s；清扫任务单线程 10s 一轮，每轮最多处理过期 PENDING 全量（`status='PENDING' AND expire_time<now()` 走部分索引）。

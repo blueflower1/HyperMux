@@ -1,4 +1,4 @@
-﻿package com.hypermux.mobile.ui.player
+package com.hypermux.mobile.ui.player
 
 import android.app.Activity
 import android.content.Context
@@ -99,7 +99,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.analytics.AnalyticsListener
@@ -118,6 +117,12 @@ import com.hypermux.mobile.ui.common.SectionTitle
 import com.hypermux.mobile.ui.common.bounceClick
 import com.hypermux.mobile.ui.common.fmtDurationMs
 import com.hypermux.mobile.ui.common.ratingText
+import com.hypermux.mobile.ui.cast.CastButton
+import com.hypermux.mobile.ui.cast.CastDeviceSheet
+import com.hypermux.mobile.ui.cast.CastIncomingBadge
+import com.hypermux.mobile.ui.cast.CastSentOverlay
+import com.hypermux.mobile.ui.cast.CastStatusDialog
+import com.hypermux.mobile.ui.cast.CastViewModel
 import com.hypermux.mobile.ui.layout.LocalLayoutProfile
 import com.hypermux.mobile.ui.layout.LayoutTier
 import com.hypermux.mobile.ui.layout.columnsFor
@@ -172,10 +177,27 @@ fun PlayerScreen(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // 播放器单实例（§6.7：同屏切集 = 换 MediaItem，不重建）
+    // ---- 投屏（M7，契约 §3.13）：本机既投送也接收 ----
+    val castVm: CastViewModel = hiltViewModel()
+    val castActive by castVm.active.collectAsStateWithLifecycle()
+    val castEnabled by castVm.enabled.collectAsStateWithLifecycle()
+    // 接收侧：非空 = 这一集是别人投过来、本机正在播
+    val incomingActiveId by castVm.incomingActiveId.collectAsStateWithLifecycle()
+    val incomingSender by castVm.incomingSender.collectAsStateWithLifecycle()
+    val incomingCastKey by castVm.incomingCastKey.collectAsStateWithLifecycle()
+    var showCastSheet by remember { mutableStateOf(false) }
+
+    // 解码档位：false = 硬解优先（默认）；true = FFmpeg 软解优先（硬解失败后的兜底档）。
+    // renderers 工厂是 ExoPlayer 建实例时就定死的，换档只能重建 PlayerController（见下面 remember 的 key），
+    // PlayerSurface 的 update 会把新实例重新挂到画面上。
+    var softwareDecodeFallback by remember { mutableStateOf(false) }
+
+    // 播放器单实例（§6.7：同屏切集 = 换 MediaItem，不重建；**只有换解码档位才重建**）
     // 播放不写缓存（第七轮：只有显式下载落盘；已完整下载的集走 CacheDataSource 只读本地缓存）
-    val controller = remember { PlayerController(context, vm.cacheManager) }
-    DisposableEffect(Unit) {
+    val controller = remember(softwareDecodeFallback) {
+        PlayerController(context, vm.cacheManager, preferSoftwareDecode = softwareDecodeFallback)
+    }
+    DisposableEffect(controller) {
         onDispose { controller.release() }
     }
 
@@ -273,11 +295,15 @@ fun PlayerScreen(
 
     var playbackError by remember { mutableStateOf<PlaybackException?>(null) }
     var autoRetryCount by remember { mutableIntStateOf(0) }
-    // 音轨解码失败容错：DTS/E-AC3 等系统无解码器的音轨会让整片报错，
-    // 这里禁用音轨后重试一次（只重试一次，防死循环）
-    var audioDisabledRetry by remember { mutableStateOf(false) }
+    // 音轨解码失败容错（阶梯版）：环绕声轨（DTS / E-AC3 等）解不了时先换一条能解的音轨，
+    // 换无可换才静音保画面。判据与三级阶梯见 AudioFallback.kt
+    val audioFallback = remember { AudioFallbackState() }
     // 软解提示只弹一次（4K 软解会卡，但不阻塞操作）
     var softwareDecodeHintShown by remember { mutableStateOf(false) }
+    // 硬解失败自动兜底：软解档只切一次（软解也失败就老实报错，不能反复重建播放器）
+    var softwareFallbackTried by remember { mutableStateOf(false) }
+    // 切档后新播放器 STATE_READY 时要回到的位置（-1 = 没有待恢复的进度）
+    var fallbackSeekMs by remember { mutableLongStateOf(-1L) }
     // 首帧渲染看门狗：有声音但画面不出来（AV1/HEVC 4K 软解过慢或不支持）时给出明确提示
     var firstFrameRendered by remember { mutableStateOf(false) }
     var showNoFrameHint by remember { mutableStateOf(false) }
@@ -297,7 +323,7 @@ fun PlayerScreen(
         hasResumedState.value = false
         playbackError = null
         autoRetryCount = 0
-        audioDisabledRetry = false
+        audioFallback.reset()
         softwareDecodeHintShown = false
         // 切集时收起浮层/复位锁屏与手势态
         showEpisodes = false
@@ -311,7 +337,7 @@ fun PlayerScreen(
     // 本地缓存 URI（已完整下载的集，见 loadPlayUrl 的"本地优先"）：切到 CacheDataSource，
     // 按缓存 key 直接读下载缓存的 span 文件——不触网、断网可播、不需要防盗链请求头；
     // 其余（未下 / 部分下载）走网络流，播放不写任何缓存（第七轮）。
-    LaunchedEffect(playUrl) {
+    LaunchedEffect(playUrl, controller) {
         val pu = playUrl ?: return@LaunchedEffect
         val local = MediaCacheManager.isCacheUri(pu.url)
         if (local) {
@@ -319,18 +345,45 @@ fun PlayerScreen(
         } else {
             controller.applyHeaders(pu.headers)
         }
+        // 换解码档位会重建 player 实例，trackSelectionParameters 跟着丢：把上一轮已经生效的
+        // 声道上限/禁音带回来，否则新实例又会选回那条坏音轨（见 AudioFallbackState.restoreOn）
+        controller.player.trackSelectionParameters =
+            audioFallback.restoreOn(controller.player.trackSelectionParameters)
         controller.play(
             androidx.media3.common.MediaItem.Builder()
                 .setUri(pu.url)
                 .build(),
             fromLocalCache = local
         )
+        // 换档重建播放器后，用户当前选的倍速要跟着带到新实例上（playUrl 没变，靠本条 effect 重跑）
+        controller.player.setPlaybackSpeed(speed)
+    }
+
+    /**
+     * 硬解失败 → 换 FFmpeg 软解优先档重建播放器，并从当前位置续播（§6.5 解码兜底）。
+     *
+     * 为什么必须换实例：Media3 的 renderers 工厂在 `ExoPlayer.Builder` 时就固定，而 ON 档下只要设备
+     * **声明**了某个硬解，MediaCodec 渲染器就认为自己能解、FFmpeg 扩展渲染器永远轮不到；厂商硬解
+     * 谎报能力（只支持 8-bit Main、或有分辨率/帧率上限）时 `enableDecoderFallback` 只能在硬解候选里
+     * 打转，整片直接报 DECODING_FAILED。第二跳只能换工厂、换实例。
+     */
+    fun switchToSoftwareDecode() {
+        if (softwareFallbackTried) return
+        softwareFallbackTried = true
+        fallbackSeekMs = runCatching { controller.player.currentPosition }.getOrDefault(0L).coerceAtLeast(0L)
+        // 换档前先把断点交出去：旧实例马上要 release，之后 onDispose 读它可能已经晚了
+        runCatching { vm.reportProgress(controller.player.currentPosition, controller.player.duration) }
+        playbackError = null
+        autoRetryCount = 0
+        Log.w("PlayerScreen", "硬解失败 → 切 FFmpeg 软解优先档重建播放器（seek=${fallbackSeekMs}ms）")
+        Toast.makeText(context, "硬解失败，已改用软件解码重试", Toast.LENGTH_LONG).show()
+        softwareDecodeFallback = true
     }
 
     // ---- 「记忆上次倍速」：进播放页把上次倍速套到 player ----
     // lastSpeed 初值是 1.0f，DataStore 读出真实值后会再触发一次；用 speedTouched 兜住重复应用，
     // 避免"用户刚选了 3.0x、DataStore 异步回流又给改回去"这种来回打脸。
-    LaunchedEffect(rememberSpeed, lastSpeed) {
+    LaunchedEffect(rememberSpeed, lastSpeed, controller) {
         if (rememberSpeed && !speedTouched) {
             speed = lastSpeed
             controller.player.setPlaybackSpeed(lastSpeed)
@@ -355,9 +408,16 @@ fun PlayerScreen(
     val entryEpisodeResumeState = rememberUpdatedState(targetVideoId == videoId)
 
     // ---- 播放事件：续播 seek / 播完 / 错误 ----
-    DisposableEffect(Unit) {
+    // key 带 controller：换解码档位会换 player 实例，监听器必须跟着搬到新实例上
+    DisposableEffect(controller) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                // 切档重建后的续播：回到硬解失败时所在的位置（与"入口那一集"的 resume 互不干扰）
+                if (state == Player.STATE_READY && fallbackSeekMs >= 0L) {
+                    val ms = fallbackSeekMs
+                    fallbackSeekMs = -1L
+                    if (ms > 0L) controller.player.seekTo(ms)
+                }
                 if (state == Player.STATE_READY && !hasResumedState.value &&
                     resumeMsState.value > 0 && entryEpisodeResumeState.value
                 ) {
@@ -396,29 +456,43 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                // ③ 音轨解码失败容错：MKV 片源的 DTS / E-AC3 等音轨，系统通常没有对应解码器，
-                //    一旦音轨解码器初始化失败，ExoPlayer 会让**整片**报错（连画面都出不来）。
-                //    因此：当前音轨仍启用时，先禁用音轨 → 重新 prepare 重试一次（静音播放），
-                //    让视频照常解码出画面；只重试一次（audioDisabledRetry）避免死循环。
-                val decoderError = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
-                    error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED
-                val audioEnabled = !controller.player.trackSelectionParameters.disabledTrackTypes
-                    .contains(C.TRACK_TYPE_AUDIO)
-                if (decoderError && audioEnabled && !audioDisabledRetry) {
-                    audioDisabledRetry = true
-                    controller.player.trackSelectionParameters =
-                        controller.player.trackSelectionParameters.buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                            .build()
-                    Toast.makeText(
-                        context,
-                        "该片源音轨（DTS 等）无法解码，已静音播放",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    controller.player.prepare()
+                // ③ 音轨解码失败容错（阶梯版）：MKV 片源常把 DTS / E-AC3 这类设备不一定能解的音轨标成
+                //    default，一旦它解码失败，ExoPlayer 会让**整片**报错（连画面都出不来）。
+                //    阶梯：声道上限滤掉环绕声轨 → 指定另一条安全音轨 → 最后才静音保画面（AudioFallback.kt）。
+                //    判据用 Media3 的 rendererFormat，音轨失败不会被当成视频失败处理（反之也不会反抢）。
+                val candidates = runCatching {
+                    audioTrackCandidates(controller.player.currentTracks)
+                }.getOrDefault(emptyList())
+                if (isAudioDecodeError(error, candidates) && !audioFallback.exhausted) {
+                    val failedMime = failedAudioMime(error, candidates)
+                    val action = planAudioFallback(candidates, failedMime, audioFallback)
+                    if (action != null) {
+                        failedMime?.let { audioFallback.triedMimes += it }
+                        applyAudioFallback(controller.player, action, audioFallback)
+                        // 归因留痕：机型矩阵/片源兼容性统计要靠这一行（§6.5 第 3 类）
+                        Log.w(
+                            "PlayerScreen",
+                            "音轨解码失败 mime=${failedMime} code=${PlaybackException.getErrorCodeName(error.errorCode)}" +
+                                " → 阶梯 ${action.stage}（第 ${audioFallback.attempts} 跳）"
+                        )
+                        Toast.makeText(context, action.userMessage, Toast.LENGTH_LONG).show()
+                        controller.player.prepare()
+                        return
+                    }
+                }
+                // 解码类错误（含"有硬解但解不了这一路"）→ 换 FFmpeg 软解优先档重试一次，
+                // 用户不用点任何按钮；软解档也失败才落到"无法解码"错误面板。
+                val decodeClassError =
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES
+                if (decodeClassError && !softwareFallbackTried) {
+                    switchToSoftwareDecode()
                     return
                 }
-                // 视频本身也解不了（重试后仍失败）→ 走原有"无法解码"错误面板
+                // 软解档也解不了 → 走原有"无法解码"错误面板
                 playbackError = error
             }
         }
@@ -427,7 +501,7 @@ fun PlayerScreen(
     }
 
     // ---- 软解提示：真正落到软件解码（4K 会卡）时给一条一次性轻提示，不阻塞操作 ----
-    DisposableEffect(Unit) {
+    DisposableEffect(controller) {
         val listener = object : AnalyticsListener {
             override fun onVideoDecoderInitialized(
                 eventTime: AnalyticsListener.EventTime,
@@ -450,7 +524,7 @@ fun PlayerScreen(
     }
 
     // ---- 断点上报循环（§7） ----
-    LaunchedEffect(isPlayingState.value) {
+    LaunchedEffect(isPlayingState.value, controller) {
         if (isPlayingState.value) {
             while (true) {
                 delay(AppConfig.PROGRESS_REPORT_INTERVAL_MS)
@@ -462,7 +536,7 @@ fun PlayerScreen(
     }
 
     // ---- 进度条刷新（500ms 足够，拖动时用本地拖动值覆盖显示） ----
-    LaunchedEffect(Unit) {
+    LaunchedEffect(controller) {
         while (true) {
             progress.positionMs = controller.player.currentPosition.coerceAtLeast(0L)
             progress.durationMs = controller.player.duration.coerceAtLeast(0L)
@@ -479,15 +553,18 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(controller) {
         onDispose {
-            vm.reportProgress(controller.player.currentPosition, controller.player.duration)
+            // 换解码档位时旧实例可能已被 release（两个 effect 同 key，释放顺序不由我们控制）→ 读它要兜住
+            runCatching { vm.reportProgress(controller.player.currentPosition, controller.player.duration) }
         }
     }
 
     // ---- 播放错误分类处理（§6.5） ----
-    val classifiedError = playbackError?.let { classifyPlaybackError(it) }
-    LaunchedEffect(playbackError) {
+    val classifiedError = playbackError?.let {
+        classifyPlaybackError(it, audioFallback.isMuted && !softwareFallbackTried)
+    }
+    LaunchedEffect(playbackError, controller) {
         val classified = classifiedError ?: return@LaunchedEffect
         if (classified.autoRetry && autoRetryCount < 1) {
             autoRetryCount++
@@ -608,17 +685,89 @@ fun PlayerScreen(
         progress.positionMs = target
     }
 
+    /**
+     * 投屏生效 → 立刻停止本地播放（避免手机与电视双声道）。
+     * 断点由电视侧走现有 10s 节流上报，手机不再写（见 PlayerViewModel 的投屏闸门）。
+     */
+    LaunchedEffect(castActive, controller) {
+        if (castActive != null) {
+            controller.player.playWhenReady = false
+        }
+    }
+
+    /** 打开投屏目标选择弹层（只列同账号在线的电视 / 网页端 / 电脑端 / 手机端设备） */
+    fun openCastSheet() {
+        castVm.openSheet()
+        showCastSheet = true
+    }
+
+    /**
+     * 接收侧：发起端取消 / 被同账号其它设备接管 → 本机停播并退出播放页
+     * （那句话的提示由导航壳统一 Toast，这里不重复弹）。
+     */
+    LaunchedEffect(controller) {
+        castVm.incomingStopRequested.collect {
+            controller.player.playWhenReady = false
+            navController.navigateUp()
+        }
+    }
+
+    /** 离开播放页 = 结束投屏接收（与 TV 端 BACK 退出、网页端离开 PlayView 同一语义，服务端记 mobile-exit）。
+     *
+     *  只收尾"这一屏自己接住的"那一路：接受投屏后 `navigatePlay` 会把**旧的**播放页 dispose 掉，
+     *  旧屏的 nav 参数与投屏目标集不一致 → 不认领，于是不会把刚接住的投屏顺手取消。
+     *  认领判据用 (movieId, videoId)：栈顶已是同一集时 `launchSingleTop` 不新建页面，
+     *  这一屏参数正好一致 → 由它认领，离开时照常收尾。 */
+    var ownedIncomingCastId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(incomingActiveId, incomingCastKey) {
+        val id = incomingActiveId
+        val key = incomingCastKey
+        ownedIncomingCastId =
+            if (id != null && key != null && key.first == movieId && key.second == videoId) id else null
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            val id = ownedIncomingCastId
+            if (id != null && castVm.incomingActiveId.value == id) castVm.cancelIncoming()
+        }
+    }
+
+    /** 「结束投屏」：只结束这一路投屏，本机继续正常播放（与网页端同一行为） */
+    fun finishIncomingCast() {
+        castVm.cancelIncoming()
+    }
+
     if (fullscreen) {
         // ================= 横屏沉浸 =================
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             PlayerSurface(controller = controller, modifier = videoModifier)
+
+            // 投屏生效：整块盖住播放区（手机只投送、不提供任何遥控控件），并停掉手势层
+            castActive?.let { ca ->
+                CastSentOverlay(
+                    active = ca,
+                    onCancel = { castVm.cancelCast() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // 接收侧徽标：这一集是别人投过来、本机正在播。点「结束投屏」只结束投屏，不停本机播放。
+            incomingActiveId?.let {
+                CastIncomingBadge(
+                    senderName = incomingSender,
+                    onFinish = { finishIncomingCast() },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp, top = 12.dp)
+                )
+            }
 
             // 手势层：锁屏时整体不挂 pointerInput（连单击都不响应）
             GestureLayer(
                 controller = controller,
                 activity = activity,
                 audioManager = audioManager,
-                enabled = !locked,
+                enabled = !locked && castActive == null,
                 onSingleTap = {
                     controlsVisible = !controlsVisible
                     controlTick++
@@ -672,6 +821,9 @@ fun PlayerScreen(
                 cacheCached = cacheCached,
                 cachePercent = cachePercent,
                 onCache = { cacheCurrentEpisode() },
+                castOn = castActive != null,
+                castEnabled = castEnabled,
+                onCast = { openCastSheet() },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -779,6 +931,7 @@ fun PlayerScreen(
                 autoRetryCount = autoRetryCount,
                 autoNext = autoNext,
                 showNoFrameHint = showNoFrameHint,
+                audioTrackFailure = audioFallback.isMuted && !softwareFallbackTried,
                 // 横屏底部控制条更高，连播卡片上抬，避免被压住
                 autoNextBottomInset = 124.dp,
                 onRetryUrl = { vm.retryPlayUrl() },
@@ -829,12 +982,32 @@ fun PlayerScreen(
             Box(modifier = videoModifier.background(Color.Black)) {
                 PlayerSurface(controller = controller, modifier = Modifier.fillMaxSize())
 
+                // 投屏生效：盖住播放区（手机只投送），并停掉竖屏手势
+                castActive?.let { ca ->
+                    CastSentOverlay(
+                        active = ca,
+                        onCancel = { castVm.cancelCast() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // 接收侧徽标：这一集是别人投过来、本机正在播。点「结束投屏」只结束投屏，不停本机播放。
+                incomingActiveId?.let {
+                    CastIncomingBadge(
+                        senderName = incomingSender,
+                        onFinish = { finishIncomingCast() },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 10.dp, top = 10.dp)
+                    )
+                }
+
                 // 竖屏手势始终可用：双击播放暂停 / 左右 seek / 上下亮度音量 / 长按倍速
                 GestureLayer(
                     controller = controller,
                     activity = activity,
                     audioManager = audioManager,
-                    enabled = true,
+                    enabled = castActive == null,
                     // 竖屏单击：切换控制浮层显隐（面板打开时先收面板）；默认状态为"显示"
                     onSingleTap = {
                         if (showSpeed) {
@@ -876,6 +1049,9 @@ fun PlayerScreen(
                     cacheCached = cacheCached,
                     cachePercent = cachePercent,
                     onCache = { cacheCurrentEpisode() },
+                    castOn = castActive != null,
+                    castEnabled = castEnabled,
+                    onCast = { openCastSheet() },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
 
@@ -932,6 +1108,7 @@ fun PlayerScreen(
                     autoRetryCount = autoRetryCount,
                     autoNext = autoNext,
                     showNoFrameHint = showNoFrameHint,
+                    audioTrackFailure = audioFallback.isMuted && !softwareFallbackTried,
                     onRetryUrl = { vm.retryPlayUrl() },
                     onRetryPlayer = { playbackError = null; controller.retry() },
                     onBack = { handleBack() },
@@ -986,6 +1163,18 @@ fun PlayerScreen(
             }
         }
     }
+
+    // ---- 投屏弹层与结果弹窗（挂在窗口层：横屏/竖屏都可用，不受 NavHost 切换影响）----
+    if (showCastSheet) {
+        CastDeviceSheet(
+            vm = castVm,
+            movieId = movieId,
+            videoId = targetVideoId,
+            positionMs = progress.positionMs,
+            onDismiss = { showCastSheet = false }
+        )
+    }
+    CastStatusDialog(vm = castVm)
 }
 
 /* =========================================================================
@@ -1858,6 +2047,9 @@ private fun PortraitControlOverlay(
     cacheCached: Boolean,
     cachePercent: Int?,
     onCache: () -> Unit,
+    castOn: Boolean,
+    castEnabled: Boolean,
+    onCast: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // 只在本浮层作用域里读进度：进度 500ms 一变，重组范围就止步于此，不会波及整页
@@ -1930,6 +2122,10 @@ private fun PortraitControlOverlay(
                     onClick = onCache,
                     size = 32.dp
                 )
+                // 投屏（M7）：目标 = 同账号电视 / 网页端 / 电脑端 / 另一台手机；投送侧不遥控；管理后台关掉功能时整个按钮不出现
+                if (castEnabled) {
+                    CastButton(casting = castOn, onClick = onCast, size = 32.dp)
+                }
                 // 下一集：无下一集时隐藏
                 if (hasNext) {
                     HyperIconButton(
@@ -1988,6 +2184,9 @@ private fun LandscapeControls(
     cacheCached: Boolean,
     cachePercent: Int?,
     onCache: () -> Unit,
+    castOn: Boolean,
+    castEnabled: Boolean,
+    onCast: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // 只在本浮层作用域里读进度（同 PortraitControlOverlay：避免整页 2Hz 重组）
@@ -2044,6 +2243,18 @@ private fun LandscapeControls(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                // 缓存 / 投屏从底部控制条挪到右上角（与选集、锁屏同一簇）：
+                // ① 横屏底栏要留给进度条与播放控制，5 个图标挤在一行里；
+                // ② 这两个是低频动作，和「选集 / 锁屏」一样属于"窗口级操作"，放右上角更顺手。
+                CacheButton(
+                    cached = cacheCached,
+                    percent = cachePercent,
+                    onClick = onCache
+                )
+                // 投屏（M7）：目标 = 同账号电视 / 网页端 / 电脑端 / 另一台手机；投送侧不遥控；管理后台关掉功能时整个按钮不出现
+                if (castEnabled) {
+                    CastButton(casting = castOn, onClick = onCast)
                 }
                 HyperIconButton(
                     icon = PlayerIcons.Episodes,
@@ -2122,11 +2333,6 @@ private fun LandscapeControls(
                     SpeedButton(
                         speed = speed,
                         onClick = onOpenSpeed
-                    )
-                    CacheButton(
-                        cached = cacheCached,
-                        percent = cachePercent,
-                        onClick = onCache
                     )
                     Spacer(Modifier.width(Spacing.sm))
                     HyperIconButton(
@@ -2662,6 +2868,7 @@ private fun BoxScope.PlayerOverlays(
     autoRetryCount: Int,
     autoNext: AutoNextState?,
     showNoFrameHint: Boolean = false,
+    audioTrackFailure: Boolean = false,
     autoNextBottomInset: Dp = 72.dp,
     onRetryUrl: () -> Unit,
     onRetryPlayer: () -> Unit,
@@ -2676,7 +2883,7 @@ private fun BoxScope.PlayerOverlays(
         ErrorOverlay(message = msg, onRetry = onRetryUrl, onBack = onBack)
     }
     playbackError?.let { error ->
-        val classified = classifyPlaybackError(error)
+        val classified = classifyPlaybackError(error, audioTrackFailure)
         ErrorOverlay(
             message = if (classified.autoRetry && autoRetryCount > 0) {
                 "${classified.message}，正在重试…"

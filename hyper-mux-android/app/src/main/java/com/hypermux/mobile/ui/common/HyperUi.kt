@@ -8,7 +8,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +33,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.hypermux.mobile.ui.layout.LayoutTier
 import com.hypermux.mobile.ui.layout.LocalLayoutProfile
 import com.hypermux.mobile.ui.layout.cappedFill
 import com.hypermux.mobile.ui.theme.Motion
@@ -630,11 +635,17 @@ fun HyperIconButton(
  * 点遮罩 / 返回键关闭；用 [Dialog] 承载才能盖住底栏与系统导航栏。
  *
  * 页面内的内容一律走**主题色**（弹层在页面之上、不在媒体之上）。
+ *
+ * [sideWhenWide] = true：窗口是「宽而矮」的形状（手机横屏）时改挂**右缘整高抽屉**
+ * （左侧圆角、自右滑入、无拖拽条）。横屏可用高只有 ~360dp，底部弹层哪怕贴内容高也要吃掉大半屏
+ * （投屏弹层真机反馈）；右侧竖栏只占屏宽 42%、上限同播放页全屏「选集」抽屉，画面主体仍完整可见。
+ * 竖屏 / 方窗口完全走原来的底部弹层行为，一个像素都不变。
  */
 @Composable
 fun HyperBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    sideWhenWide: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val hc = hyperColors()
@@ -663,10 +674,11 @@ fun HyperBottomSheet(
         val hostView = LocalView.current
         val density = LocalDensity.current.density
         var bottomCompensation by remember { mutableStateOf(0.dp) }
+        var endCompensation by remember { mutableStateOf(0.dp) }
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = bottomCompensation)
+                .padding(bottom = bottomCompensation, end = endCompensation)
                 .onGloballyPositioned {
                     val location = IntArray(2)
                     hostView.getLocationOnScreen(location)
@@ -676,6 +688,11 @@ fun HyperBottomSheet(
                     // 存在 ROM 差异，万一算出离谱的补偿量，最多也只让弹层上移 64dp，不会被顶出屏幕。
                     val next = overflowPx.coerceIn(0, (64 * density).toInt()) / density
                     if (next != bottomCompensation.value) bottomCompensation = next.dp
+                    // 横向同理（横屏侧栏抽屉才会暴露）：窗口被左侧刘海/状态栏内缩、内容仍按满屏宽布局，
+                    // 内容右缘落到屏幕外 ~104px，贴右缘的抽屉会被推出屏幕、内容右侧被裁（真机实测）。
+                    val overflowEnd = (location[0] + hostView.width) - screenRightPx(hostView)
+                    val nextEnd = overflowEnd.coerceIn(0, (64 * density).toInt()) / density
+                    if (nextEnd != endCompensation.value) endCompensation = nextEnd.dp
                 }
         ) {
             // 弹层高度上限 = 屏高 90%（用弹窗窗口的实际约束算，不猜屏幕尺寸）。
@@ -686,6 +703,17 @@ fun HyperBottomSheet(
             // 常见整季无需滚动即可看全；>45 集在网格内滚动，底栏恒定可见。
             val sheetMaxHeight = with(constraints) {
                 if (hasBoundedHeight) (maxHeight / density * 0.90f).dp else 600.dp
+            }
+            // 宽扁窗口判定用**弹窗窗口自己的约束**（横屏 792×360dp → 走侧栏），不猜屏幕尺寸、不读 Configuration
+            val sideMode = sideWhenWide && constraints.maxWidth > constraints.maxHeight
+            // 侧栏宽度与播放页全屏「选集」抽屉同一口径：屏宽 42%，上限按档 320 / 380 / 440dp
+            val sideWidth = with(constraints) {
+                val cap = when (profile.tier) {
+                    LayoutTier.Compact -> 320.dp
+                    LayoutTier.Medium -> 380.dp
+                    LayoutTier.Expanded -> 440.dp
+                }
+                (maxWidth / density * 0.42f).dp.coerceAtMost(cap)
             }
             AnimatedVisibility(
                 visible = shown,
@@ -704,12 +732,15 @@ fun HyperBottomSheet(
             }
             AnimatedVisibility(
                 visible = shown,
-                enter = slideInVertically(tween(Motion.BASE, easing = Motion.Emphasized)) { it } +
+                enter = (if (sideMode) slideInHorizontally(tween(Motion.BASE, easing = Motion.Emphasized)) { it }
+                         else slideInVertically(tween(Motion.BASE, easing = Motion.Emphasized)) { it }) +
                     fadeIn(tween(Motion.FAST)),
-                exit = slideOutVertically(tween(Motion.FAST)) { it } + fadeOut(tween(Motion.FAST)),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                exit = (if (sideMode) slideOutHorizontally(tween(Motion.FAST)) { it }
+                        else slideOutVertically(tween(Motion.FAST)) { it }) + fadeOut(tween(Motion.FAST)),
+                modifier = Modifier.align(if (sideMode) Alignment.CenterEnd else Alignment.BottomCenter)
             ) {
-                val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                val shape = if (sideMode) RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
+                            else RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
                 // 与 HyperDialog 同理：弹层不在 Surface 里，必须显式提供 onSurface，
                 // 否则深色主题下弹层里的裸 Text 会是黑字压深底。
                 CompositionLocalProvider(
@@ -717,30 +748,54 @@ fun HyperBottomSheet(
                 ) {
                     Column(
                         modifier = modifier
-                            // 大屏封顶：弹层不能横贯整屏（Compact 档 Infinity → 原铺满行为不变）
-                            .cappedFill(profile.sheetMaxWidth)
-                            .heightIn(max = sheetMaxHeight)
+                            .then(
+                                if (sideMode) Modifier.width(sideWidth).fillMaxHeight()
+                                // 大屏封顶：弹层不能横贯整屏（Compact 档 Infinity → 原铺满行为不变）
+                                else Modifier
+                                    .cappedFill(profile.sheetMaxWidth)
+                                    .heightIn(max = sheetMaxHeight)
+                            )
                             .clip(shape)
                             .background(MaterialTheme.colorScheme.surface)
                             .border(1.dp, hc.line, shape)
-                            .navigationBarsPadding()
+                            // 侧栏是整高的，上下系统栏都得让开；底部弹层只需让开导航栏
+                            .then(if (sideMode) Modifier.statusBarsPadding().navigationBarsPadding()
+                                 else Modifier.navigationBarsPadding())
                             .padding(top = Spacing.sm)
                     ) {
-                        // 顶部拖拽条：给"可以下拉关闭"的心理暗示
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterHorizontally)
-                                .padding(bottom = Spacing.sm)
-                                .size(width = 36.dp, height = 4.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(hc.lineStrong)
-                        )
+                        // 顶部拖拽条：给"可以下拉关闭"的心理暗示（侧栏没有下拉关闭语义，不画）
+                        if (!sideMode) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterHorizontally)
+                                    .padding(bottom = Spacing.sm)
+                                    .size(width = 36.dp, height = 4.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(hc.lineStrong)
+                            )
+                        }
                         content()
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * 显示区右缘（屏幕可见区域右缘）的像素坐标。
+ *
+ * 与 [screenBottomPx] 同一口径：取**当前窗口**的 metrics，30 以下退回 DisplayMetrics。
+ */
+private fun screenRightPx(view: View): Int {
+    val context = view.context
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        context.getSystemService(WindowManager::class.java)
+            ?.currentWindowMetrics?.bounds?.right
+            ?.let { return it }
+    }
+    @Suppress("DEPRECATION")
+    return context.resources.displayMetrics.widthPixels
 }
 
 /**

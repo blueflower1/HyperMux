@@ -52,6 +52,21 @@ fun NavController.navigatePlay(movieId: Long, videoId: Long) {
 }
 
 /**
+ * 投屏拉起播放（契约 §3.13）：带上手机端当前位置与来源设备名。
+ *
+ * 与 [navigatePlay] 一样用 `launchSingleTop`：TV 已在播放页时又收到投屏请求，
+ * 直接把当前这一层换掉，不叠第二层播放页（ExoPlayer 实例会随目的地销毁）。
+ */
+fun NavController.navigatePlayCast(
+    movieId: Long,
+    videoId: Long,
+    resumeMs: Long,
+    senderName: String
+) {
+    navigate(Route.playCast(movieId, videoId, resumeMs, senderName)) { launchSingleTop = true }
+}
+
+/**
  * 「二级页」防连点通用实现（所有 push 型入口都走它）。
  *
  * 判据：栈顶已是**同一目的地**（[pattern] 相同）**且参数一致**（[sameArgs] 成立）→ 忽略本次。

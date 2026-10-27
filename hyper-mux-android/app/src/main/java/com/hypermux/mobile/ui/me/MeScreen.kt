@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.hypermux.mobile.BuildConfig
@@ -67,9 +71,13 @@ import com.hypermux.mobile.ui.common.HyperChip
 import com.hypermux.mobile.ui.common.HyperDialog
 import com.hypermux.mobile.ui.common.HyperIconButton
 import com.hypermux.mobile.ui.common.HyperSwitch
+import com.hypermux.mobile.ui.common.HyperTextField
 import com.hypermux.mobile.ui.common.OfflineBanner
 import com.hypermux.mobile.ui.common.bounceClick
 import com.hypermux.mobile.ui.common.formatBytes
+import com.hypermux.mobile.ui.cast.CastStatusDialog
+import com.hypermux.mobile.ui.cast.CastViewModel
+import com.hypermux.mobile.ui.cast.castTargetName
 import com.hypermux.mobile.ui.navigation.BottomNavBar
 import com.hypermux.mobile.ui.navigation.navigateDownloads
 import com.hypermux.mobile.ui.navigation.navigateScan
@@ -79,9 +87,13 @@ import com.hypermux.mobile.ui.layout.cappedFill
 import com.hypermux.mobile.ui.theme.Spacing
 import com.hypermux.mobile.ui.theme.hyperColors
 import com.hypermux.mobile.ui.update.UpdateViewModel
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** 「我的」页投屏设备在线状态的自动刷新间隔 */
+private const val CAST_DEVICE_POLL_MS = 5_000L
 
 /**
  * 我的页（§5.8）：个人资料卡 + 主题切换 + 服务器地址 + 存储（封面缓存）+ 登录信息 + 退出登录。
@@ -113,6 +125,18 @@ fun MeScreen(navController: NavController) {
     val updateRowText by updateVm.rowText.collectAsStateWithLifecycle()
     val updateManual by updateVm.manualResult.collectAsStateWithLifecycle(initialValue = null)
 
+    // 投屏（M7，契约 §3.13）：本机设备身份 + 同账号投屏目标（电视 / 网页端 / 电脑端 / 手机端）
+    val castVm: CastViewModel = hiltViewModel()
+    val castDevices by castVm.devices.collectAsStateWithLifecycle()
+    val castSelfName by castVm.selfName.collectAsStateWithLifecycle()
+    val castDeviceId by castVm.deviceId.collectAsStateWithLifecycle()
+    // 接收侧（本机当目标端）：轮询是否在跑、是否正在播别人投过来的那一集
+    val castReceiving by castVm.receivingPolling.collectAsStateWithLifecycle()
+    val castIncomingActive by castVm.incomingActiveId.collectAsStateWithLifecycle()
+    val castIncomingSender by castVm.incomingSender.collectAsStateWithLifecycle()
+    var showCastNameDialog by remember { mutableStateOf(false) }
+    var castNameDraft by remember { mutableStateOf("") }
+
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var coverCacheBytes by remember { mutableStateOf(settingsVm.coverCacheBytes()) }
@@ -121,6 +145,37 @@ fun MeScreen(navController: NavController) {
 
     // 进页面重算一次缓存占用（DownloadManager 的索引在别处可能已变化）
     LaunchedEffect(Unit) { settingsVm.refreshCacheStats() }
+
+    // 进「我的」页刷新投屏设备列表（顺带注册本机设备 + 拉投屏开关状态）
+    LaunchedEffect(Unit) { castVm.openSheet() }
+
+    // 设备在线状态自动轮询（5s）：原来只能手点刷新，TV 开机/退出后本页看不出变化。
+    // 只在「本页在前台」时跑：离开本页（DisposableEffect 释放）或 App 退到后台（ON_STOP）立刻停，
+    // 不会让锁屏的手机空打接口。服务端 devices 列表是两次按 user_id 的索引读、不写库，压力可忽略
+    // （口径见 DevicePresenceService：在线由 TV 自己 2s 一次的 cast/poll 心跳决定，手机轮询只是读）。
+    val castLifecycle = LocalLifecycleOwner.current
+    var castPollOn by remember { mutableStateOf(false) }
+    DisposableEffect(castLifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> castPollOn = true
+                Lifecycle.Event.ON_STOP -> castPollOn = false
+                else -> Unit
+            }
+        }
+        castLifecycle.lifecycle.addObserver(observer)
+        onDispose {
+            castLifecycle.lifecycle.removeObserver(observer)
+            castPollOn = false
+        }
+    }
+    LaunchedEffect(castPollOn) {
+        if (!castPollOn) return@LaunchedEffect
+        while (true) {
+            castVm.refreshDevices()
+            delay(CAST_DEVICE_POLL_MS)
+        }
+    }
 
     // 手动检查结果 toast（启动被动检查不打扰，不走到这里）
     // 展示后立刻消费（清空），否则该结果会随「我的」页每次进入被重放一次
@@ -194,6 +249,55 @@ fun MeScreen(navController: NavController) {
                     )
                 }
 
+                // 投屏（M7，契约 §3.13）：本机设备身份 + 本机接收状态 + 同账号投屏目标（在线状态用绿色区分）
+                Section(title = "投屏") {
+                    HyperCard(modifier = Modifier.fillMaxWidth()) {
+                        InfoRow(
+                            label = "本机设备名",
+                            value = castSelfName.ifBlank { "手机" },
+                            onClick = {
+                                castNameDraft = castSelfName
+                                showCastNameDialog = true
+                            }
+                        )
+                        InfoRow(
+                            label = "本机设备号",
+                            value = "…${castDeviceId.takeLast(8)}"
+                        )
+                        // 接收侧状态：这台手机能不能被投屏。轮询 = 在线心跳，App 在后台时自动停。
+                        InfoRow(
+                            label = "投屏接收",
+                            value = when {
+                                castIncomingActive != null ->
+                                    "正在接收来自「${castIncomingSender ?: "其它设备"}」的投屏"
+                                castReceiving -> "监听中 · 别的设备可投到本机"
+                                else -> "未监听 · App 在后台时不接收"
+                            },
+                            valueColor = if (castReceiving || castIncomingActive != null) MaterialTheme.colorScheme.primary else null,
+                            leading = { OnlineDot(online = castReceiving || castIncomingActive != null) }
+                        )
+                        if (castDevices.isEmpty()) {
+                            InfoRow(
+                                label = "投屏目标",
+                                value = "未发现同账号的其它设备 · 点此刷新",
+                                onClick = { castVm.refreshDevices() },
+                                showDivider = false
+                            )
+                        } else {
+                            castDevices.forEachIndexed { i, d ->
+                                // 在线用品牌绿（含前置圆点）明确区分：离线只是"目标端没开 App"，不是错误状态
+                                InfoRow(
+                                    label = castTargetName(d.platform, d.deviceName),
+                                    value = if (d.online) "在线" else "离线 · 目标端未打开 App",
+                                    valueColor = if (d.online) MaterialTheme.colorScheme.primary else null,
+                                    leading = { OnlineDot(online = d.online) },
+                                    onClick = { castVm.refreshDevices() },
+                                    showDivider = i < castDevices.lastIndex
+                                )
+                            }
+                        }
+                    }
+                }
                 // 播放偏好：长按倍速（可配置）+ 记忆上次倍速
                 Section(title = "播放") {
                     HyperCard(modifier = Modifier.fillMaxWidth()) {
@@ -315,16 +419,6 @@ fun MeScreen(navController: NavController) {
                     style = HyperButtonStyle.Secondary,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Text(
-                    text = "HyperMux Android ${BuildConfig.VERSION_NAME} · 与 TV 端 / Web 端共用同一套内容",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Spacing.md),
-                    textAlign = TextAlign.Center
-                )
             }
         }
     }
@@ -427,6 +521,41 @@ fun MeScreen(navController: NavController) {
             }
         )
     }
+
+    // 本机设备名修改：电视的投屏确认弹窗上显示的就是它
+    if (showCastNameDialog) {
+        HyperDialog(
+            onDismissRequest = { showCastNameDialog = false },
+            title = { Text("本机设备名") },
+            text = {
+                HyperTextField(
+                    value = castNameDraft,
+                    onValueChange = { castNameDraft = it },
+                    placeholder = "手机 · 机型",
+                    label = "电视的投屏确认弹窗上会显示这个名字"
+                )
+            },
+            confirmButton = {
+                HyperButton(
+                    text = "保存",
+                    onClick = {
+                        if (castNameDraft.isNotBlank()) castVm.setSelfName(castNameDraft)
+                        showCastNameDialog = false
+                    }
+                )
+            },
+            dismissButton = {
+                HyperButton(
+                    text = "取消",
+                    onClick = { showCastNameDialog = false },
+                    style = HyperButtonStyle.Ghost
+                )
+            }
+        )
+    }
+
+    // 投屏结果弹窗：在其它页面（播放页/详情页）发起的投屏，结果也会在这里出现
+    CastStatusDialog(vm = castVm)
 }
 
 /**
@@ -521,9 +650,22 @@ private fun Section(
     }
 }
 
+/** 投屏设备在线状态圆点：在线 = 品牌绿实心，离线 = 发丝线灰点 */
+@Composable
+private fun OnlineDot(online: Boolean) {
+    val hc = hyperColors()
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(if (online) MaterialTheme.colorScheme.primary else hc.lineStrong)
+    )
+}
+
 /**
  * 统一的「信息行」：左标签 + 右值（次要色），可整行点击，行高固定 48dp。
  * [showDivider] 为 true 时在该行下方画 1dp 发丝线（最后一行传 false）。
+ * [leading] 挂在标签左侧（状态圆点之类）；[valueColor] 用于让某些值跳出色阶（如投屏"在线"的品牌绿）。
  */
 @Composable
 private fun InfoRow(
@@ -531,7 +673,9 @@ private fun InfoRow(
     value: String? = null,
     onClick: (() -> Unit)? = null,
     showDivider: Boolean = true,
-    trailing: (@Composable () -> Unit)? = null
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    valueColor: Color? = null
 ) {
     val hc = hyperColors()
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -548,23 +692,30 @@ private fun InfoRow(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (leading != null) {
+                leading()
+                Spacer(Modifier.width(Spacing.sm))
+            }
             Text(
                 text = label,
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurface,
+                // 标签必须能收缩：右值长（片名 → 设备名）时不挤不换行，直接省略号
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+            Spacer(Modifier.width(Spacing.sm))
             if (value != null) {
                 Text(
                     text = value,
                     fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = valueColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             if (trailing != null) {
-                Spacer(Modifier.width(Spacing.sm))
                 trailing()
             }
         }

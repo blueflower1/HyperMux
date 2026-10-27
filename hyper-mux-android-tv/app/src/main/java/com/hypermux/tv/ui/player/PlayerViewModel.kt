@@ -53,6 +53,17 @@ class PlayerViewModel @Inject constructor(
     val movieId: Long = state.get<Long>("movieId") ?: -1L
     val videoId: Long = state.get<Long>("videoId") ?: -1L
 
+    // ---- 远程投屏（契约 §3.13）----
+
+    /** 投屏起点（ms）：-1 / 缺失 = 不是投屏拉起的播放（走常规续播判定） */
+    private val castResumeMs: Long = state.get<Long>("castResumeMs") ?: -1L
+
+    /** 发起投屏的手机设备名（顶栏徽标显示） */
+    val castSenderName: String? = state.get<String>("castSender")?.takeIf { it.isNotBlank() }
+
+    /** 本次播放是否由远程投屏拉起（决定顶栏徽标与退出时是否 cancel） */
+    val isCastPlay: Boolean get() = castResumeMs >= 0L
+
     // ---- 倍速偏好（「我的」页可改；播放页消费） ----
 
     /** 长按手势的目标倍速（默认 2.0x） */
@@ -136,14 +147,16 @@ class PlayerViewModel @Inject constructor(
                     .flatMap { it.videos }
                     .find { it.id == videoId }
                 val progress = current?.progress
-                _resumeMs.value = if (progress != null &&
-                    progress.positionMs > AppConfig.RESUME_THRESHOLD_MS &&
-                    (progress.durationMs <= 0 ||
-                        progress.positionMs < progress.durationMs - AppConfig.RESUME_THRESHOLD_MS)
-                ) {
-                    progress.positionMs
-                } else {
-                    0L
+                _resumeMs.value = when {
+                    // 投屏拉起：起点由手机端给出，优先于服务端断点（用户要的就是"接着手机的位置播"）
+                    castResumeMs >= 0L -> castResumeMs
+
+                    progress != null &&
+                        progress.positionMs > AppConfig.RESUME_THRESHOLD_MS &&
+                        (progress.durationMs <= 0 ||
+                            progress.positionMs < progress.durationMs - AppConfig.RESUME_THRESHOLD_MS) -> progress.positionMs
+
+                    else -> 0L
                 }
             }
         }

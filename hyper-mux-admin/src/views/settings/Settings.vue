@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * 系统设置：元数据刮削来源（TMDB / 豆瓣可切换）与 TMDB API Key。
+ * 系统设置：元数据刮削来源（TMDB / 豆瓣可切换）与 TMDB API Key + 远程投屏开关与确认倒计时。
  * 新建/编辑影片的「刮削元数据」会使用这里的当前来源。
+ * 投屏两项落 sys_config、覆盖 application.yml 的 hypermux.cast.* 默认值，保存后即时生效不用重启。
  */
 import { onMounted, reactive, ref } from 'vue'
 import {
@@ -11,9 +12,11 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NRadioButton,
   NRadioGroup,
   NSpace,
+  NSwitch,
   useMessage,
 } from 'naive-ui'
 import { settingsApi } from '@/api/settings'
@@ -26,6 +29,9 @@ const saving = ref(false)
 const form = reactive({
   metadataProvider: 'tmdb' as 'tmdb' | 'douban',
   tmdbApiKey: '',
+  castEnabled: true,
+  // NInputNumber 清空时会给到 null，这里允许 null 并在保存时兜回默认值
+  castConfirmSeconds: 6 as number | null,
 })
 
 async function load() {
@@ -34,6 +40,8 @@ async function load() {
     const s = await settingsApi.get()
     form.metadataProvider = s.metadataProvider
     form.tmdbApiKey = s.tmdbApiKey
+    form.castEnabled = s.castEnabled
+    form.castConfirmSeconds = s.castConfirmSeconds
   } catch (e) {
     message.error(errMsg(e))
   } finally {
@@ -48,9 +56,13 @@ async function save() {
     const s = await settingsApi.update({
       metadataProvider: form.metadataProvider,
       tmdbApiKey: form.tmdbApiKey.trim(),
+      castEnabled: form.castEnabled,
+      castConfirmSeconds: form.castConfirmSeconds ?? 6,
     })
     form.metadataProvider = s.metadataProvider
     form.tmdbApiKey = s.tmdbApiKey
+    form.castEnabled = s.castEnabled
+    form.castConfirmSeconds = s.castConfirmSeconds
     message.success('已保存')
   } catch (e) {
     message.error(errMsg(e))
@@ -65,7 +77,7 @@ async function save() {
     <div class="hm-page-head">
       <div>
         <div class="hm-page-title">系统设置</div>
-        <div class="hm-page-sub">配置元数据刮削来源。新建 / 编辑影片时按片名刮削即取此处设置</div>
+        <div class="hm-page-sub">配置元数据刮削来源与远程投屏。新建 / 编辑影片时按片名刮削即取此处设置</div>
       </div>
     </div>
 
@@ -100,6 +112,31 @@ async function save() {
           <NAlert type="warning" :bordered="false" style="width: 100%">
             豆瓣刮削为尽力而为，若长时间无结果或报错，建议切换到 TMDB。
           </NAlert>
+        </NFormItem>
+
+        <NFormItem label="远程投屏">
+          <NSwitch v-model:value="form.castEnabled" />
+          <template #feedback>
+            <span class="hint">
+              本期支持手机端 → 同账号的电视端。关闭后所有端不可投屏：手机端不显示投屏入口，
+              电视端轮询拿到空结果（不会报错），已确认的投屏不受影响、可自然播完。
+            </span>
+          </template>
+        </NFormItem>
+
+        <NFormItem label="确认倒计时">
+          <NInputNumber
+            v-model:value="form.castConfirmSeconds"
+            :min="3"
+            :max="15"
+            :step="1"
+            show-button-controls
+          />
+          <template #feedback>
+            <span class="hint">
+              电视收到投屏请求后弹窗默认选「是」，倒计时结束自动进入播放；取值 3~15 秒，默认 6 秒。
+            </span>
+          </template>
         </NFormItem>
 
         <NFormItem label=" ">

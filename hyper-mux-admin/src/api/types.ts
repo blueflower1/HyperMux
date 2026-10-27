@@ -196,6 +196,10 @@ export interface MetadataDetailVo {
 export interface SettingsVo {
   metadataProvider: 'tmdb' | 'douban'
   tmdbApiKey: string
+  /** 远程投屏总开关（关闭后所有端不可投屏，契约 §3.13 / §4.12） */
+  castEnabled: boolean
+  /** TV 端确认弹窗倒计时秒数（3~15，默认 6） */
+  castConfirmSeconds: number
 }
 
 /** 元数据候选图片（挑封面用） */

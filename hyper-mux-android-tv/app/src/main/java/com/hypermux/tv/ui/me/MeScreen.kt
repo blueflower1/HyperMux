@@ -53,6 +53,7 @@ import com.hypermux.tv.BuildConfig
 import com.hypermux.tv.data.model.SessionUserVo
 import com.hypermux.tv.data.repo.ServerMode
 import com.hypermux.tv.ui.AuthViewModel
+import com.hypermux.tv.ui.CastViewModel
 import com.hypermux.tv.ui.NetworkViewModel
 import com.hypermux.tv.ui.SettingsViewModel
 import com.hypermux.tv.ui.common.HyperButton
@@ -109,6 +110,13 @@ fun MeScreen(navController: NavController) {
     val updateRowText by updateVm.rowText.collectAsStateWithLifecycle()
     val updateManual by updateVm.manualResult.collectAsStateWithLifecycle(initialValue = null)
 
+    // 远程投屏（契约 §3.13）：同样必须读窗口层那一份实例（poll 由 AppNavigation 驱动）
+    val castVm: CastViewModel = hiltViewModel(context as ComponentActivity)
+    val castEnabled by castVm.enabled.collectAsStateWithLifecycle()
+    val castPolling by castVm.polling.collectAsStateWithLifecycle()
+    var castSelfName by remember { mutableStateOf("") }
+    var castSelfId by remember { mutableStateOf("") }
+
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var coverCacheBytes by remember { mutableStateOf(settingsVm.coverCacheBytes()) }
@@ -125,6 +133,13 @@ fun MeScreen(navController: NavController) {
             message = if (it.ok) it.msg else "检查更新失败：${it.msg}"
             updateVm.consumeManualResult()
         }
+    }
+
+    // 进「我的」页：刷新投屏配置（管理后台刚关掉功能 / 改了倒计时要能立刻反映）+ 读本机设备身份
+    LaunchedEffect(Unit) {
+        castVm.refreshConfig()
+        castSelfId = castVm.selfDeviceId()
+        castSelfName = castVm.selfDeviceName()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -183,6 +198,30 @@ fun MeScreen(navController: NavController) {
                         InfoRow(label = "主题", value = "深色（TV 固定）", showDivider = false)
                         HintRow("TV 端固定深色：客厅远距离观影时浅色主题眩光明显")
                     }
+                }
+            }
+
+            // 远程投屏（契约 §3.13，计划书 80-cast-detailed.md §9.4）：接收状态 + 本机设备身份
+            item(key = "cast") {
+                Section(title = "远程投屏") {
+                    HyperCard(modifier = Modifier.fillMaxWidth()) {
+                        InfoRow(
+                            label = "投屏接收",
+                            value = when {
+                                !castEnabled -> "已由管理后台关闭"
+                                castPolling -> "已开启（本电视在线）"
+                                else -> "未运行（需已登录）"
+                            },
+                            showDivider = true
+                        )
+                        InfoRow(label = "本机设备名", value = castSelfName.ifBlank { "电视" }, showDivider = true)
+                        InfoRow(
+                            label = "本机设备号",
+                            value = if (castSelfId.isBlank()) "—" else "…${castSelfId.takeLast(8)}",
+                            showDivider = false
+                        )
+                    }
+                    HintRow("手机需登录同一账号并停留在 HyperMux 内发起投屏；本电视退出登录或退到后台即离线")
                 }
             }
 
@@ -254,15 +293,6 @@ fun MeScreen(navController: NavController) {
                         onClick = { showLogoutDialog = true },
                         style = HyperButtonStyle.Secondary,
                         modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "HyperMux TV ${BuildConfig.VERSION_NAME} · 与手机端 / Web 端共用同一套内容",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = Spacing.md),
-                        textAlign = TextAlign.Center
                     )
                 }
             }

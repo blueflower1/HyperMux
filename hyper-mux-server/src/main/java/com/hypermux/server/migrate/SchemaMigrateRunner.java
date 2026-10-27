@@ -8,8 +8,7 @@ import com.hypermux.server.movie.MovieMapper;
 import com.hypermux.server.user.SysUserEntity;
 import com.hypermux.server.user.UserMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -24,10 +23,16 @@ import java.util.List;
  * 1) 执行 classpath:sql/schema.sql（CREATE TABLE IF NOT EXISTS / ALTER ADD COLUMN IF NOT EXISTS）；
  * 2) 回填影片拼音检索列（只处理 title_pinyin IS NULL 的存量行）；
  * 3) 若库内无管理员且配置了 admin-bootstrap-password，则创建初始管理员。
+ *
+ * 为什么是 InitializingBean 而不是 ApplicationRunner：
+ * ApplicationRunner 在容器 refresh 完成之后才跑，而 @EnableScheduling 的调度器在 refresh 过程中
+ * 就已启动 —— 于是 @Scheduled(fixedDelay) 的首轮（无 initialDelay）会先于建表执行，
+ * 新库首启必然报 "relation xxx does not exist"（CastSweeper 踩过）。
+ * afterPropertiesSet 属于单例实例化阶段，严格早于调度器与 Web 容器启动，表结构一定先就绪。
  */
 @Slf4j
 @Component
-public class SchemaMigrateRunner implements ApplicationRunner {
+public class SchemaMigrateRunner implements InitializingBean {
 
     private final DataSource dataSource;
     private final UserMapper userMapper;
@@ -43,7 +48,7 @@ public class SchemaMigrateRunner implements ApplicationRunner {
     }
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void afterPropertiesSet() {
         if (!props.isEnabled()) {
             log.info("[migrate] 已关闭（hypermux.migrate.enabled=false）");
             return;
@@ -59,25 +64,33 @@ public class SchemaMigrateRunner implements ApplicationRunner {
         }
 
         backfillPinyin();
+        bootstrapAdmin();
+    }
 
-        Long adminCount = userMapper.selectCount(
-                new LambdaQueryWrapper<SysUserEntity>().eq(SysUserEntity::getRole, SysUserEntity.ROLE_ADMIN));
-        if (adminCount != null && adminCount > 0) {
-            return;
+    /** 库内无管理员时按配置自举一个；失败不阻断启动（与拼音回填同一口径）。 */
+    private void bootstrapAdmin() {
+        try {
+            Long adminCount = userMapper.selectCount(
+                    new LambdaQueryWrapper<SysUserEntity>().eq(SysUserEntity::getRole, SysUserEntity.ROLE_ADMIN));
+            if (adminCount != null && adminCount > 0) {
+                return;
+            }
+            String password = props.getAdminBootstrapPassword();
+            if (password == null || password.isBlank()) {
+                log.warn("[migrate] 库内无管理员，且未配置 admin-bootstrap-password，跳过创建");
+                return;
+            }
+            SysUserEntity admin = new SysUserEntity();
+            admin.setUsername(props.getAdminBootstrapUsername());
+            admin.setPasswordHash(new BCryptPasswordEncoder().encode(password));
+            admin.setNickName("超级管理员");
+            admin.setRole(SysUserEntity.ROLE_ADMIN);
+            admin.setStatus(1);
+            userMapper.insert(admin);
+            log.info("[migrate] 已创建初始管理员: {}", admin.getUsername());
+        } catch (Exception e) {
+            log.error("[migrate] 管理员自举失败（不影响启动）", e);
         }
-        String password = props.getAdminBootstrapPassword();
-        if (password == null || password.isBlank()) {
-            log.warn("[migrate] 库内无管理员，且未配置 admin-bootstrap-password，跳过创建");
-            return;
-        }
-        SysUserEntity admin = new SysUserEntity();
-        admin.setUsername(props.getAdminBootstrapUsername());
-        admin.setPasswordHash(new BCryptPasswordEncoder().encode(password));
-        admin.setNickName("超级管理员");
-        admin.setRole(SysUserEntity.ROLE_ADMIN);
-        admin.setStatus(1);
-        userMapper.insert(admin);
-        log.info("[migrate] 已创建初始管理员: {}", admin.getUsername());
     }
 
     /** 存量影片拼音列回填：只处理 title_pinyin IS NULL 的行（新建/更新由 MovieAdminService 维护）。 */

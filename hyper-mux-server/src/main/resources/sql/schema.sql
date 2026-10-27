@@ -129,3 +129,51 @@ ALTER TABLE movie ADD COLUMN IF NOT EXISTS backdrop_url text;
 -- 拼音检索列（TV 遥控器只能打拉丁字母：全拼/首字母子串匹配），存量回填见 SchemaMigrateRunner
 ALTER TABLE movie ADD COLUMN IF NOT EXISTS title_pinyin varchar(512);
 ALTER TABLE movie ADD COLUMN IF NOT EXISTS title_initials varchar(128);
+
+-- ============ 账号设备（M7 投屏 · 2026-10-22） ============
+-- 客户端安装级 UUID；"在线"不落库（内存 Caffeine 判定），last_seen 仅供展示且落库节流 30s。
+CREATE TABLE IF NOT EXISTS user_device (
+  id bigserial PRIMARY KEY,
+  user_id int8 NOT NULL REFERENCES sys_user(id) ON DELETE CASCADE,
+  device_id varchar(64) NOT NULL,
+  platform varchar(16) NOT NULL,
+  device_name varchar(64),
+  last_seen timestamptz,
+  create_time timestamptz NOT NULL DEFAULT now(),
+  update_time timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_device_user_device UNIQUE (user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_user ON user_device (user_id, platform);
+
+-- ============ 投屏请求（M7 投屏，单并发） ============
+-- 状态机：PENDING → ACCEPTED | REJECTED | EXPIRED | CANCELLED；ACCEPTED → CLOSED。
+-- 过期判定只认 expire_time（Caffeine 会被轮询续期，绝不能拿它判过期）。
+CREATE TABLE IF NOT EXISTS cast_request (
+  id bigserial PRIMARY KEY,
+  user_id int8 NOT NULL REFERENCES sys_user(id) ON DELETE CASCADE,
+  sender_device_id varchar(64) NOT NULL,
+  target_device_id varchar(64) NOT NULL,
+  sender_name varchar(64),
+  target_name varchar(64),
+  movie_id int8 NOT NULL,
+  video_id int8 NOT NULL,
+  movie_title varchar(191) NOT NULL,
+  episode_label varchar(64),
+  cover_url text,
+  position_ms int8 NOT NULL DEFAULT 0,
+  status varchar(16) NOT NULL DEFAULT 'PENDING',
+  expire_time timestamptz NOT NULL,
+  decided_time timestamptz,
+  closed_time timestamptz,
+  notified_at timestamptz,
+  end_reason varchar(32),
+  create_time timestamptz NOT NULL DEFAULT now(),
+  update_time timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_cast_status CHECK (status IN ('PENDING','ACCEPTED','REJECTED','EXPIRED','CANCELLED','CLOSED'))
+);
+-- 单并发铁律：每账号同时最多 1 条 PENDING（部分唯一索引兜底，服务层先做抢占）
+CREATE UNIQUE INDEX IF NOT EXISTS uk_cast_pending_user ON cast_request (user_id) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS idx_cast_target_status ON cast_request (target_device_id, status, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_cast_user_time ON cast_request (user_id, create_time DESC);
+-- cancelledIds 下发窗口：只下发"被终态化且尚未通知过目标设备"的请求
+CREATE INDEX IF NOT EXISTS idx_cast_notify ON cast_request (target_device_id, notified_at);

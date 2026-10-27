@@ -1,6 +1,7 @@
 # 30 · API 接口契约
 
-> 隶属：[PLAN.md](../../PLAN.md) · 版本 v1.6 · 对应文档：[10-data-model](./10-data-model.md) / [20-backend-detailed](./20-backend-detailed.md) / [50-admin-detailed](./50-admin-detailed.md)
+> 隶属：[PLAN.md](../../PLAN.md) · 版本 v1.7 · 对应文档：[10-data-model](./10-data-model.md) / [20-backend-detailed](./20-backend-detailed.md) / [50-admin-detailed](./50-admin-detailed.md) / [80-cast-detailed](./80-cast-detailed.md)
+> v1.7（2026-10-22，M7 投屏）：**新增 §3.13 远程投屏与设备**（`/api/app/devices/**`、`/api/app/cast/**`，全部需 role=0 token，无匿名端点）；§4.12 系统设置增 `castEnabled` / `castConfirmSeconds`。传输为**短周期轮询**（TV 2s、手机 1s），本期无 SSE/WebSocket 端点。两处实现口径：`cast/current` 的 `data` 是**壳对象** `{active: …|null}`（`data` 直接为 null 会被 Android 侧 `safeApiCall` 判成 500）；投屏功能关闭时 `cast/poll` 返回 **200 + 空 `pending`** 而不是 409。
 > v1.6（2026-10-11）：新增 §3.10 全局搜索 `GET /api/app/search`（片名/原名模糊，仅 PUBLISHED 且分类启用，支持分页）；供 web 首页全局搜索框使用
 > v1.5（2026-10-11，v3）：**影片池 → 影视类型**——`GET /api/app/home` 的 `pools[]` 改 `categories[]`；`GET /api/app/pool/{id}/movies` 改 `/api/app/category/{id}/movies`；后台 `/api/admin/pools` 改 `/api/admin/categories`；`movie` 的 `poolId/poolName` 全部改 `categoryId/categoryName`。§3/§4 相关示例旧字段名以本则为准。
 > v1.4（2026-10-11，v2 定位调整）：**移除** §4.9 刮削任务 / §4.10 候选审核 两节全部端点；**新增** `POST /openlist/import`（目录导入解析）、`GET /metadata/search` + `GET /metadata/detail`（元数据刮削）、`GET|PUT /settings`（系统设置）；`source` 列表/请求去掉 刮削范围/识别规则 字段（includePaths/matchMode/extWhitelist/ignorePatterns/autoPublish/lastScrapeAt/lastError）。sql 索引、token 形态不变
@@ -26,7 +27,7 @@
 | 大小 | 字节数（`size` 字段），展示单位由前端换算 |
 | 评分 | `rating`：`number`，0~10 一位小数（`3.5`/`null`） |
 
-**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；扫码登录的 `POST /api/app/auth/qr/create`、`GET /api/app/auth/qr/status`（§3.12）免认证（目标端登录前可用），`qr/scan`、`qr/confirm` 需普通用户 token；`/api/app/**` 要普通用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。
+**鉴权范围**：`/api/app/auth/login`、`/api/admin/auth/login` 免认证；App 自更新端点 `GET /api/app/update/check`、`GET /api/app/update/download`（§3.11）同免认证（检查须在登录前可用）；扫码登录的 `POST /api/app/auth/qr/create`、`GET /api/app/auth/qr/status`（§3.12）免认证（目标端登录前可用），`qr/scan`、`qr/confirm` 需普通用户 token；`/api/app/**` 要普通用户 token；`/api/admin/**` 要管理员 token。静态资源（`/**`）开放；`actuator/health` 位于**管理端口**（默认 `127.0.0.1:9090`，见 [70-deploy-ops.md](./70-deploy-ops.md)），**不对外暴露**。客户端连通性探测改用受保护接口（如 `GET /api/app/home`，返回 401 即代表服务可达且为本服务）。**投屏与设备端点（§3.13）全部需要普通用户 token，无匿名端点**；`user_id` 一律取自 token，请求体里的 `deviceId/senderDeviceId/targetDeviceId` 只用于在同账号范围内定位设备，服务端绝不按请求体跨账号取设备。
 
 **CORS**：`/api/**` 默认放行跨源（`hypermux.cors-origins`，逗号分隔 pattern，置空禁用），供 Web 观看端「自定义/预设服务器」跨源访问；鉴权走 `Authorization` 头不吃 Cookie，故 `allowCredentials=false` + 通配源不引入 CSRF 面。
 
@@ -250,7 +251,7 @@ Query：
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | code | int | ✔ | 客户端自身 versionCode |
-| platform | string | | 默认 `mobile`；白名单 `mobile`/`tv`，其他值 400 |
+| platform | string | | 默认 `mobile`；白名单 `mobile`/`tv`/`windows`，其他值 400 |
 
 响应：**仅当**该平台最新 versionCode > `code` 时 `200 + R<UpdateCheckVo>`；无更新（未发布 / 已最新）→ **204 无 body**。
 
@@ -266,7 +267,7 @@ Query：
 
 #### `GET /api/app/update/download`
 
-Query：`platform`（同上）。响应：APK 全量流式（`application/vnd.android.package-archive` + `Content-Length` + `Content-Disposition: attachment; filename="hypermux-{platform}-{versionName}.apk"`）；**不支持 Range**，客户端失败即整包重下。
+Query：`platform`（同上）。响应：更新包全量流式（mobile/tv 为 `application/vnd.android.package-archive`，windows 为 `application/octet-stream`；`Content-Length` + `Content-Disposition: attachment; filename="hypermux-{platform}-{versionName}{.apk|.exe}"`）；**不支持 Range**，客户端失败即整包重下。
 错误：404（该平台未发布 / 文件缺失——文件被手工删除后记录仍在，提示"请重新发布"）。
 
 ### 3.12 扫码登录（TV / Web 显示二维码 → 手机 App 确认）
@@ -294,6 +295,103 @@ Body：`{ "id": "<uuid>" }`。响应 `data: true`。手机解出码后、弹确�
 Body：`{ "id": "<uuid>" }`。响应 `data: true`。绑定当前手机用户并签发与密码登录同规则的 JWT；幂等（重复 confirm 不重复签发）。错误：404 码已过期 / 403 账号不可用。
 
 > 手机端只有登录后才能进入「扫一扫」，"必须登录才能确认"天然成立；确认前必须用户在手机上显式点确认。
+
+### 3.13 远程投屏与设备（手机 → TV / 网页端 / 电脑端 / 另一台手机，M7）
+
+> 详细设计（状态机 / 单并发 / 失败模式 / 测试流程）见 [80-cast-detailed.md](./80-cast-detailed.md)。**传输为短周期轮询**：接收端（TV / 网页端 / 电脑端 / 手机端）每 2s 轮 `cast/poll`（与 §3.12 的 2s 轮询同构），手机发起后每 1s 轮 `cast/request/status`（上限 17s）。本期没有 SSE/WebSocket 端点。
+> 前置铁律：**发送端与目标端必须登录同一账号**；后端只中转指令，**不中转视频流**（接收端自己调 §3.6 换直链）。
+
+#### `POST /api/app/devices/register`
+
+请求：`{ "deviceId": "<客户端安装级 UUID>", "platform": "mobile|tv|web|windows", "deviceName": "客厅电视" }`
+- `deviceId` 必填 ≤64；`platform` 必填且在白名单内（与 §3.11 平台口径一致）；`deviceName` 可空，服务端截断 64 并清洗控制字符。
+- 幂等 upsert（`uk_device_user_device`）。调用时机：登录成功、App 启动恢复会话、打开投屏入口。顺带刷新该设备"在线"状态。
+
+响应 `data`：`{ "deviceId": "tv-01" }`
+
+#### `GET /api/app/devices?platform=tv`
+
+Query：`platform`（可空 = 全部）。
+
+响应 `data`（数组，`lastSeen` 降序）：
+
+```json
+[
+  { "deviceId": "tv-01", "platform": "tv", "deviceName": "客厅电视",
+    "online": true, "lastSeen": 1791490000000, "casting": false }
+]
+```
+
+- `online`：该设备最近 30s 内调过 `devices/register` 或 `cast/poll`（内存判定，**不落库**）。
+- `casting`：该设备正被投屏（存在本账号的 PENDING/ACCEPTED 请求指向它）。
+
+#### `POST /api/app/cast/request`
+
+请求：`{ "targetDeviceId": "tv-01", "senderDeviceId": "phone-01", "movieId": 12, "videoId": 301, "positionMs": 5240000 }`
+- `positionMs` 可空（缺省 0）：从播放页发起传手机当前位置。
+
+响应 `data`：`{ "requestId": 88, "expiresIn": 15, "targetName": "客厅电视" }`
+
+错误：400（参数缺失 / `senderDeviceId==targetDeviceId`）、404（目标设备不存在或不属于本账号 / 影片不可见 / video 不属于该 movie 或 missing）、409（目标离线 `目标端不在线，请先在电视 / 网页端 / 电脑端 / 手机端打开 HyperMux` / 投屏功能已关闭 / 单并发索引冲突）。目标平台不再设限：`register` 已把 `platform` 收敛成 `mobile/tv/web/windows`，四端都可作为接收端。
+
+**单并发**：每账号同时最多 1 条 `PENDING`。新请求会抢占旧请求（旧 → `CANCELLED`/`CLOSED`，`end_reason=preempted`），旧目标接收端在下一次 `poll` 收到 `cancelledIds` 后关弹窗或停止播放。
+
+#### `GET /api/app/cast/request/status?id=<requestId>`
+
+手机每 1s 轮询，最多 17s。
+
+响应 `data`：`{ "id": 88, "status": "PENDING|ACCEPTED|REJECTED|EXPIRED|CANCELLED|CLOSED", "targetName": "客厅电视", "endReason": "user-yes" }`
+
+- `ACCEPTED` → 手机弹「{targetName} 已接受你远程投屏的请求」并停止本地播放；`REJECTED` → 「目标端已拒绝投屏请求」；`EXPIRED` → 「目标端未响应，请稍后重试」。
+
+#### `GET /api/app/cast/poll?deviceId=tv-01`
+
+TV 每 2s 轮询（登录态 + App 前台才轮）。顺带刷新该设备在线状态。
+
+响应 `data`：
+
+```json
+{
+  "pending": {
+    "id": 88, "senderDeviceId": "phone-01", "senderName": "手机 · Pixel 7",
+    "movieId": 12, "videoId": 301, "movieTitle": "狂飙", "episodeLabel": "第5集",
+    "coverUrl": "https://...", "positionMs": 5240000,
+    "expireTime": 1791490015000, "confirmSeconds": 6
+  },
+  "cancelledIds": [],
+  "confirmSeconds": 6
+}
+```
+
+- `pending=null` 表示无待确认请求；TV 据此弹窗（默认焦点「是」，`confirmSeconds` 秒倒计时，归零自动 accept）。
+- **投屏功能被管理后台关闭时本接口照常返回 200 + 空 `pending`**（不是 409）：TV 每 2s 轮一次，报错会让电视端反复弹错误提示。
+- `cancelledIds`：该设备最近 `hypermux.cast.notify-window`（默认 **2 分钟**）内被终态化、且它可能还不知道的请求 id（被 cancel / 被抢占）。TV 收到后：弹窗正显示该 id → 关闭；正在播放该请求带来的集 → 停止播放回上一页。每个 id 只下发一次（下发即置 `notified_at`）。
+- 错误：429（同一设备两次 poll 间隔 < `hypermux.cast.poll-min-interval-ms`，客户端忽略并继续正常周期）。
+
+#### `POST /api/app/cast/accept`
+
+请求：`{ "id": 88, "reason": "user-yes" | "countdown" }`（缺省 `user-yes`）
+响应 `data`：`{ "id": 88, "movieId": 12, "videoId": 301, "positionMs": 5240000, "movieTitle": "狂飙", "episodeLabel": "第5集" }`
+错误：404（请求不存在或不属于本账号）、409（`该投屏请求已结束`，含重复 accept 与已过期）。
+
+#### `POST /api/app/cast/reject`
+
+请求：`{ "id": 88 }` → 响应 `data: true`。已是终态也返回 `true`（幂等）。
+
+#### `POST /api/app/cast/cancel`
+
+请求：`{ "id": 88 }` → 响应 `data: true`（幂等）。调用方：发起端「取消投屏」，或接收端退出投屏播放页（`end_reason` 服务端按状态推导为 `sender-cancel` / `tv-exit`（TV）/ `web-exit`（网页端）/ `desktop-exit`（电脑端）/ `mobile-exit`（接收端手机））。
+
+#### `GET /api/app/cast/current`
+
+响应 `data`：**包壳对象** `{ "active": { id, status, senderDeviceId, targetDeviceId, senderName, targetName, movieId, videoId, movieTitle, episodeLabel, coverUrl, positionMs, startedTime } | null }`，没有投屏时 `active=null`。两端重启/切后台回来后用它恢复投屏状态。
+
+> 为什么包一层壳：`data` 直接给 `null` 时，Android 侧 `safeApiCall` 会把它判成「服务端返回数据为空」的 500 错误，无法表达"当前没有投屏"这个正常状态。壳对象恒非空，`active` 才可为空。
+
+#### `GET /api/app/cast/config`
+
+响应 `data`：`{ "enabled": true, "confirmSeconds": 6, "requestTtlSeconds": 15, "pollIntervalMs": 2000 }`
+两端投屏入口打开时各取一次（`enabled=false` → 隐藏入口）。
 
 ---
 
@@ -624,6 +722,17 @@ Query: page, size, keyword?, sourceId?, unparsed?
 | mandatory | | 默认 false（强制更新，见 §3.11） |
 
 服务端行为：校验（空文件 / 非 .apk / >300MB / 版本号回退 → 400/409）→ 先落 `{platform}-latest.apk.uploading` 临时文件 → 计算 sha256 → 原子替换正式文件 → **文件成功后才落库**（记录存在即文件必存）。存储目录由 `hypermux.apk.dir` 配置（env `HYPERMUX_APK_DIR`，默认 `~/.hypermux/apks`），见 [70-deploy-ops.md](./70-deploy-ops.md)。
+
+### 4.12 系统设置（`sys_config` 键值）
+
+#### `GET /api/admin/settings`
+响应 `data`：`{ "metadataProvider": "tmdb|douban", "tmdbApiKey": "…", "castEnabled": true, "castConfirmSeconds": 6 }`
+
+#### `PUT /api/admin/settings`
+请求（PATCH 语义，缺省不更）：`{ "metadataProvider"?: string, "tmdbApiKey"?: string, "castEnabled"?: boolean, "castConfirmSeconds"?: int }`
+- `castEnabled`：投屏总开关（落 `sys_config.cast_enabled` = `true`/`false`），**覆盖** `hypermux.cast.enabled` 默认值，改完即时生效不用重启；关闭后所有 `/api/app/cast/**` 返回 409 `投屏功能已关闭`。
+- `castConfirmSeconds`：接收端（TV / 网页端 / 电脑端 / 手机端）投屏确认弹窗倒计时秒数，取值 **3~15**，缺省 6；非法值 400。随 `cast/poll` 的 `confirmSeconds` 下发给接收端。
+- 响应 `data`：同 GET（回显最新全量）。
 
 ---
 

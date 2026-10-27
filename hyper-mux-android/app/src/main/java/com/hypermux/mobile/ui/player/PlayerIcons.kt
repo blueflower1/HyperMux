@@ -129,9 +129,21 @@ internal object PlayerIcons {
         }
     }
 
+    /**
+     * 投屏：圆角屏幕框（左下角留缺口）+ 从左下角向外扩散的两段信号弧 + 端点。
+     * 端点用"零长度线 + 圆头线帽"画成实心圆点（比另起一条 solid 路径更稳）。
+     */
+    val Cast: ImageVector by lazy {
+        build("PlayerCast") {
+            line("M4.5 6.3Q4.5 4.5 6.3 4.5h11.4q1.8 0 1.8 1.8v11.4q0 1.8-1.8 1.8H12.9")
+            line("M4.5 15.3a4.2 4.2 0 0 1 4.2 4.2", width = 1.6f)
+            line("M4.5 11.4a8.1 8.1 0 0 1 8.1 8.1", width = 1.6f)
+            line("M4.6 19.4h0.01", width = 2.4f)
+        }
+    }
+
     /** 选集：2×2 圆角方块网格（比横线列表图标更贴"选集/目录"语义） */
-    val Episodes: ImageVector by lazy {
-        build("PlayerEpisodes") {
+    val Episodes: ImageVector by lazy {        build("PlayerEpisodes") {
             // 24 网格内 2×2 方块：每块 6.6，块间距 1.8，圆角 1.8
             line("M6.3 4.5h3q1.8 0 1.8 1.8v3q0 1.8-1.8 1.8h-3Q4.5 11.1 4.5 9.3V6.3Q4.5 4.5 6.3 4.5Z")
             line("M14.7 4.5h3q1.8 0 1.8 1.8v3q0 1.8-1.8 1.8h-3q-1.8 0-1.8-1.8V6.3q0-1.8 1.8-1.8Z")

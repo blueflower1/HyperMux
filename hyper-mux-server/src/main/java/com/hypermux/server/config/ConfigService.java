@@ -18,6 +18,9 @@ public class ConfigService {
     public static final String KEY_SITE_NAME = "site_name";
     public static final String KEY_SCRAPE_EXT = "scrape_ext";
     public static final String KEY_SCRAPE_IGNORE = "scrape_ignore";
+    // ---- M7 投屏（管理后台可运行时覆盖 hypermux.cast.* 默认值，改完即时生效不用重启）----
+    public static final String KEY_CAST_ENABLED = "cast_enabled";
+    public static final String KEY_CAST_CONFIRM_SECONDS = "cast_confirm_seconds";
 
     private final SysConfigMapper mapper;
 

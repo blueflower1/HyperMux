@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,7 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
@@ -36,6 +40,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hypermux.tv.data.update.UpdateDownloadState
 import com.hypermux.tv.ui.AuthViewModel
+import com.hypermux.tv.ui.CastViewModel
+import com.hypermux.tv.ui.cast.CastConfirmDialog
 import com.hypermux.tv.ui.category.CategoryScreen
 import com.hypermux.tv.ui.history.HistoryScreen
 import com.hypermux.tv.ui.home.HomeScreen
@@ -118,6 +124,48 @@ fun AppNavigation() {
     val updateDown by updateVm.down.collectAsStateWithLifecycle(initialValue = UpdateDownloadState.Down.Idle)
     // 安装权限提示：走 TV 提示层（系统 Toast 在电视上不可读）
     var message by remember { mutableStateOf<String?>(null) }
+
+    // ---- 远程投屏（契约 §3.13，计划书 80-cast-detailed.md §9）----
+    // CastViewModel 挂在窗口层：确认弹窗要能在任何页面弹出（用户可能正停在首页/详情页/播放页）
+    val castVm: CastViewModel = hiltViewModel()
+    val castPending by castVm.pending.collectAsStateWithLifecycle()
+    val castLaunch by castVm.launch.collectAsStateWithLifecycle()
+    val castNotice by castVm.notice.collectAsStateWithLifecycle()
+    val castConfirmSec by castVm.confirmSeconds.collectAsStateWithLifecycle()
+
+    // 轮询只在「已登录 + App 在前台」时跑：
+    // 轮询本身就是设备在线心跳，后台空转会把 TV 一直标成在线，手机就能投到一个没人看的电视上。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, session != null) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (session != null) castVm.startPolling()
+                Lifecycle.Event.ON_STOP -> castVm.stopPolling()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            castVm.stopPolling()
+        }
+    }
+
+    // 确认成功 → 拉起播放（起点 = 手机端当前位置）
+    LaunchedEffect(castLaunch) {
+        castLaunch?.let {
+            navController.navigatePlayCast(it.movieId, it.videoId, it.resumeMs, it.senderName)
+            castVm.consumeLaunch()
+        }
+    }
+
+    // 投屏相关的提示（请求已结束 / 已取消）走 TV 提示层
+    LaunchedEffect(castNotice) {
+        castNotice?.let {
+            message = it
+            castVm.consumeNotice()
+        }
+    }
 
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
@@ -227,7 +275,16 @@ fun AppNavigation() {
                     Route.Play,
                     arguments = listOf(
                         navArgument("movieId") { type = NavType.LongType },
-                        navArgument("videoId") { type = NavType.LongType }
+                        navArgument("videoId") { type = NavType.LongType },
+                        // 投屏专用（契约 §3.13）：有默认值 → 普通 navigatePlay 的调用点不受影响
+                        navArgument("castResumeMs") {
+                            type = NavType.LongType
+                            defaultValue = -1L
+                        },
+                        navArgument("castSender") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
                     ),
                     enterTransition = PlayEnterTransition,
                     exitTransition = PageExitTransition,
@@ -294,6 +351,17 @@ fun AppNavigation() {
     }
 
     message?.let { TvMessageOverlay(message = it, onDismiss = { message = null }) }
+
+    // 投屏确认弹窗挂在窗口层（与更新弹窗同理）：首页/详情页/播放页都能收到，
+    // 默认聚焦「是」，倒计时归零自动进入播放，遥控器 BACK = 「否」。
+    castPending?.let { p ->
+        CastConfirmDialog(
+            pending = p,
+            confirmSeconds = castConfirmSec,
+            onAccept = { reason -> castVm.accept(reason) },
+            onReject = { castVm.reject() }
+        )
+    }
 }
 
 /** 兼容保留：判断当前目的地是否属于"一级页"（供需要区分的调用方使用） */
