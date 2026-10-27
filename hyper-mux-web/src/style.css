@@ -25,6 +25,7 @@
   --cover-bg-a: #dfe3ee;
   --cover-bg-b: #c3c9da;
   --topbar-h: 56px;
+  --titlebar-h: 0px;
   --tabbar-h: calc(58px + env(safe-area-inset-bottom));
   --r-lg: 18px;
   --r: 14px;
@@ -82,8 +83,12 @@ body {
 }
 
 /* 明暗切换：结构容器随 body 一起柔和过渡到新主题色
-   （:where 零优先级，不会覆盖各组件自带的 hover 过渡） */
-:where(.topbar, .content, .sidebar, .tabbar, .card) {
+   （:where 零优先级，不会覆盖各组件自带的 hover 过渡）
+   落地页容器一并纳入：否则 landing 自身背景瞬时切换、body 还在渐变，会出现新旧主题并存的分层感 */
+:where(.topbar, .content, .sidebar, .tabbar, .card,
+  .landing, .landing-nav, .landing-feature, .landing-footer, .landing-card-meta,
+  .mk-screen, .mk-win, .mk-browser, .mk-titlebar, .mk-browser-bar, .mk-url,
+  .mk-search, .mk-bar-row, .mk-progress, .mk-tabs, .mk-win-side i) {
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 
@@ -146,6 +151,77 @@ img {
   flex-direction: column;
 }
 
+/* ---------- 桌面壳自绘标题栏（无边框窗口，仅 Tauri） ---------- */
+.titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tb-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.tb-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-primary);
+  background: var(--primary-grad);
+}
+
+.tb-actions {
+  display: flex;
+  height: 100%;
+}
+
+.tb-btn {
+  width: 44px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  border-radius: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tb-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tb-btn.tb-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* 登录路由：内容区去内边距，登录页正好铺满剩余视口（否则 content 的 20/40 padding 会撑出滚动条） */
+.app.login-route .content {
+  padding: 0;
+}
+
+/* 桌面壳：标题栏占高由变量统一驱动所有 sticky 偏移 */
+.app.desktop {
+  --titlebar-h: 34px;
+}
+
 .shell {
   display: flex;
   flex: 1;
@@ -162,7 +238,7 @@ img {
 /* ---------- 顶栏 ---------- */
 .topbar {
   position: sticky;
-  top: 0;
+  top: var(--titlebar-h);
   z-index: 60;
   height: var(--topbar-h);
   backdrop-filter: blur(14px);
@@ -379,8 +455,8 @@ img {
   width: 220px;
   flex: none;
   position: sticky;
-  top: calc(var(--topbar-h) + 20px);
-  max-height: calc(100vh - var(--topbar-h) - 40px);
+  top: calc(var(--topbar-h) + 20px + var(--titlebar-h));
+  max-height: calc(100vh - var(--topbar-h) - 40px - var(--titlebar-h));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -816,6 +892,10 @@ img {
   background: var(--primary-soft);
 }
 
+/* ---------- 横向 rail（滚动外壳见 components/RailScroller.vue）---------- */
+.rail-wrap {
+  position: relative;
+}
 .rail {
   display: flex;
   gap: 14px;
@@ -823,7 +903,13 @@ img {
   scroll-snap-type: x proximity;
   padding: 4px 2px 10px;
   margin: 0 -2px;
-  scrollbar-width: thin;
+  /* 原生滚动条在 Windows(WebView2)/Chrome 上会挂一条通栏白条，和卡片抢戏；
+     "还有内容"改由 RailScroller 的翻页按钮 + 两端渐隐表达 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.rail::-webkit-scrollbar {
+  display: none;
 }
 .rail > * {
   flex: 0 0 auto;
@@ -835,6 +921,72 @@ img {
 @media (min-width: 1200px) {
   .rail-card {
     width: 160px;
+  }
+}
+
+/* 两端渐隐：只在该方向还有内容时亮起 */
+.rail-mask {
+  position: absolute;
+  top: 0;
+  bottom: 10px;
+  width: 46px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.rail-mask.left {
+  left: 0;
+  background: linear-gradient(90deg, var(--bg), transparent);
+}
+.rail-mask.right {
+  right: 0;
+  background: linear-gradient(270deg, var(--bg), transparent);
+}
+.rail-mask.on {
+  opacity: 0.92;
+}
+
+/* 翻页按钮：可悬停设备才渲染（触屏靠原生横滑，按钮会压住封面） */
+.rail-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%) scale(0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+  transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease,
+    border-color 0.16s ease, background 0.16s ease;
+}
+.rail-nav.left {
+  left: 4px;
+}
+.rail-nav.right {
+  right: 4px;
+}
+@media (hover: hover) {
+  .rail-nav {
+    display: flex;
+  }
+  .rail-wrap:hover .rail-nav,
+  .rail-nav:focus-visible {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  .rail-nav:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-soft);
   }
 }
 
@@ -1074,6 +1226,454 @@ img {
   background: #fff;
 }
 
+/* ---------- 桌面端下载（面板 / 徽章 / 我的页管理） ---------- */
+.btn-sm {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  border-radius: var(--r-sm);
+}
+
+.ep-dl {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 6px;
+  background: rgba(0, 190, 6, 0.16);
+  color: var(--primary);
+  pointer-events: none;
+}
+.ep-dl.is-done {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.dl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.dl-sheet {
+  width: min(640px, 100%);
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  animation: dlSheetIn 0.18s ease;
+}
+@keyframes dlSheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dl-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dl-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+.dl-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.dl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dl-count {
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.dl-toggle-all {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.dl-toggle-all.disabled {
+  color: var(--text-3);
+}
+
+.dl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 2px;
+}
+
+.dl-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+.dl-cell.is-selected {
+  border-color: var(--primary);
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface-2));
+}
+.dl-cell.is-done {
+  opacity: 0.62;
+}
+.dl-cell.is-busy {
+  opacity: 0.8;
+}
+.dl-cell:not(:disabled):hover {
+  border-color: var(--line-strong);
+}
+
+.dl-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 6px;
+  border: 1.5px solid var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+}
+.dl-cell.is-selected .dl-mark,
+.dl-cell.is-done .dl-mark {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.dl-ep {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dl-pct {
+  font-size: 11px;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.dl-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 右上角下载面板（TopBar 入口） */
+.dl-wrap {
+  position: relative;
+}
+.icon-btn.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.dl-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dl-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 360px;
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  z-index: 80;
+  padding: 4px 0 0;
+  animation: dlSheetIn 0.16s ease;
+}
+.dl-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.dl-panel-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+.dl-panel-count {
+  font-size: 12px;
+  color: var(--primary);
+  font-weight: 700;
+}
+.dl-panel-close {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.dl-panel-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.dl-panel-empty {
+  padding: 14px 12px 18px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.dl-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.dl-panel-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* 我的页下载管理行 */
+.dl-item {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line);
+}.dl-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dl-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.dl-item-meta {
+  font-size: 12px;
+  color: var(--text-3);
+  flex: none;
+}
+.dl-item.is-paused .dl-item-name {
+  color: var(--text-2);
+}
+.dl-item-act {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  padding: 4px 8px;
+}
+.dl-item-act.danger {
+  color: var(--danger);
+}
+.dl-bar {
+  margin-top: 7px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.dl-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary-grad);
+  transition: width 0.3s ease;
+}
+.dl-bar i.indeterminate {
+  width: 30%;
+  animation: dlInd 1.1s ease-in-out infinite;
+}
+@keyframes dlInd {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+/* ---------- 投屏（web 端 = 接收端） ---------- */
+/* 遮罩与面板复用 .dl-overlay / .dl-sheet，这里只覆盖层级与投屏专属排版 */
+.cast-overlay {
+  z-index: 95;
+}
+.cast-card {
+  width: min(520px, 100%);
+  gap: 14px;
+}
+.cast-card .dl-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cast-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.cast-cover {
+  flex: 0 0 84px;
+  width: 84px;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.cast-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cast-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cast-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.cast-resume,
+.cast-hint {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.cast-bar {
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.cast-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary-grad);
+  transition: width 1s linear;
+}
+
+/* 播放页顶栏徽标 + 结束投屏按钮 */
+.cast-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cast-end {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+/* 「我的」页投屏接收区 */
+.cast-live {
+  color: var(--primary);
+  font-weight: 600;
+}
+.cast-targets {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 12px 6px;
+}
+.cast-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.cast-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.cast-dot.on {
+  background: var(--primary);
+}
+.cast-target-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-target-state {
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* ---------- 播放页 ---------- */
 .is-watched {
   color: var(--text-3);
@@ -1088,7 +1688,7 @@ img {
 
 .play-topbar {
   position: sticky;
-  top: 0;
+  top: var(--titlebar-h);
   z-index: 40;
   display: flex;
   align-items: center;
@@ -1273,6 +1873,7 @@ img {
 
 /* ---------- 登录 ---------- */
 .login-page {
+  position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -1282,6 +1883,19 @@ img {
   background:
     radial-gradient(60% 45% at 50% 0%, var(--primary-soft), transparent 70%),
     var(--bg);
+}
+
+.app.desktop .login-page {
+  min-height: calc(100vh - var(--titlebar-h));
+}
+
+.login-theme-btn {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+.app.desktop .login-theme-btn {
+  top: 48px;
 }
 
 .login-card {
@@ -1565,13 +2179,6 @@ img {
   filter: brightness(0.97);
 }
 
-.me-footer {
-  margin-top: 22px;
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
 /* ---------- 404 ---------- */
 .notfound {
   min-height: 60vh;
@@ -1591,7 +2198,7 @@ img {
 /* ---------- Toast ---------- */
 .toast-host {
   position: fixed;
-  top: calc(var(--topbar-h) + 12px);
+  top: calc(var(--topbar-h) + 12px + var(--titlebar-h));
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;

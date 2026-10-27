@@ -3,15 +3,19 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
 import Cover from '@/components/Cover.vue'
+import DownloadSheet from '@/components/DownloadSheet.vue'
 import { getMovieDetail, getMovieSeasons } from '@/api'
 import type { MovieDetail, Season, VideoItem } from '@/api/types'
 import { errMsg } from '@/api/http'
 import { useToastStore } from '@/stores/toast'
+import { isDesktop } from '@/stores/desktop'
+import { episodeState } from '@/stores/download'
 import { fmtSec, progressPct, remainText } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToastStore()
+const desktop = isDesktop()
 
 const movieId = computed(() => Number(route.params.id))
 
@@ -66,6 +70,16 @@ function epState(v: VideoItem): { cls: string; pct: number } | null {
   if (v.progress.finished === 1) return { cls: 'is-watched', pct: 100 }
   if (detail.value?.progress?.videoId === v.id) return { cls: 'is-playing', pct }
   return { cls: 'is-progress', pct }
+}
+
+/* ---------- 桌面端下载（对齐 Android 缓存面板交互） ---------- */
+const dlSheetOpen = ref(false)
+
+function dlBadge(v: VideoItem): { text: string; done: boolean } | null {
+  const st = episodeState(movieId.value, v.id)
+  if (st.state === 'downloaded') return { text: '✓', done: true }
+  if (st.state === 'downloading') return { text: st.percent >= 0 ? Math.round(st.percent) + '%' : '…', done: false }
+  return null
 }
 
 async function load() {
@@ -154,6 +168,9 @@ watch(movieId, load)
           >
             <Icon name="play" :size="14" /> 从第 1 集开始
           </button>
+          <button v-if="desktop" class="btn" type="button" title="选择剧集缓存到本地" @click="dlSheetOpen = true">
+            <Icon name="download" :size="14" /> 缓存
+          </button>
         </div>
       </div>
     </div>
@@ -189,6 +206,14 @@ watch(movieId, load)
         >
           {{ v.title || v.episodeNo }}
           <span v-if="epState(v)" class="ep-progress"><i :style="{ width: epState(v)!.pct + '%' }"></i></span>
+          <span
+            v-if="dlBadge(v)"
+            class="ep-dl"
+            :class="{ 'is-done': dlBadge(v)!.done }"
+            :title="dlBadge(v)!.done ? '已下载，可本地播放' : '下载中'"
+          >
+            {{ dlBadge(v)!.text }}
+          </span>
         </button>
       </div>
     </div>
@@ -196,5 +221,14 @@ watch(movieId, load)
       <Icon name="film" :size="24" />
       <div class="empty-title">暂无可播放的剧集</div>
     </div>
+
+    <DownloadSheet
+      v-if="dlSheetOpen && seasons.length"
+      :movie-id="movieId"
+      :movie-title="detail!.title"
+      :seasons="seasons"
+      :initial-season-no="activeSeason"
+      @close="dlSheetOpen = false"
+    />
   </div>
 </template>

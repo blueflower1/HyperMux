@@ -4,6 +4,7 @@ import Icon from '@/components/Icon.vue'
 import Cover from '@/components/Cover.vue'
 import MovieCard from '@/components/MovieCard.vue'
 import CategoryRail from '@/components/CategoryRail.vue'
+import RailScroller from '@/components/RailScroller.vue'
 import { getHome, searchMovies } from '@/api'
 import { errMsg } from '@/api/http'
 import { useCategories } from '@/composables/useCategories'
@@ -196,7 +197,7 @@ onBeforeUnmount(() => {
         <div class="section-head">
           <h2 class="section-title">继续观看</h2>
         </div>
-        <div class="rail">
+        <RailScroller>
           <router-link
             v-for="c in continueList"
             :key="c.movieId"
@@ -218,7 +219,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </router-link>
-        </div>
+        </RailScroller>
       </section>
 
       <template v-if="categories.length">

@@ -25,8 +25,8 @@ function onThemeToggle(e: MouseEvent) {
 }
 
 function goAfterLogin() {
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-  router.replace(redirect.startsWith('/') ? redirect : '/')
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/home'
+  router.replace(redirect.startsWith('/') && redirect !== '/' ? redirect : '/home')
 }
 
 async function onSubmit() {
@@ -52,7 +52,7 @@ async function onSubmit() {
 }
 
 /* ---------- 扫码登录（与 TV 端同构：create 一次 → 2s 轮询 → 60s 换新码） ---------- */
-type QrState = 'init' | 'waiting' | 'scanned' | 'confirmed' | 'unsupported' | 'error'
+type QrState = 'init' | 'waiting' | 'scanned' | 'confirmed' | 'unsupported' | 'error' | 'needServer'
 
 const qrState = ref<QrState>('init')
 const qrDataUrl = ref('')
@@ -86,8 +86,9 @@ async function startQr() {
     if (destroyed) return
     qrId = r.qrId
     qrCreatedAt = Date.now()
-    // 载荷与手机端 ScanViewModel 约定一致：web 来源用 web-login
-    qrDataUrl.value = await QRCode.toDataURL(`hypermux://web-login?id=${qrId}`, {
+    // 载荷与手机端 ScanViewModel 约定一致：浏览器 web 用 web-login，Tauri 桌面壳用 win-login
+    const kind = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined' ? 'win' : 'web'
+    qrDataUrl.value = await QRCode.toDataURL(`hypermux://${kind}-login?id=${qrId}`, {
       margin: 1,
       width: 412,
     })
@@ -154,6 +155,8 @@ const qrStatusText = computed(() => {
       return '已确认，正在登录…'
     case 'unsupported':
       return '服务器不支持扫码登录'
+    case 'needServer':
+      return '请先输入并保存服务器地址'
     case 'error':
       return qrError.value || '二维码获取失败，重试中…'
   }
@@ -166,12 +169,23 @@ const qrPlaceholderText = computed(() => {
       return '正在生成二维码…'
     case 'unsupported':
       return '服务器不支持扫码登录'
+    case 'needServer':
+      return '请先输入并保存服务器地址'
     default:
       return '获取失败，自动重试中'
   }
 })
 
-/** 档位切换：会话属于旧服务器，清掉并按新档位重开码 */
+/** 选了自定义但还没保存地址：停掉扫码引擎，二维码置灰 */
+function onServerPending() {
+  clearTimers()
+  qrId = ''
+  qrDataUrl.value = ''
+  qrError.value = ''
+  qrState.value = 'needServer'
+}
+
+/** 档位切换（含自定义保存成功）：会话属于旧服务器，清掉并按新档位重开码 */
 function onServerChanged() {
   user.clear()
   startQr()
@@ -196,7 +210,10 @@ onBeforeUnmount(() => {
           <div class="qr-frame">
             <img v-if="qrDataUrl" :src="qrDataUrl" alt="登录二维码" />
             <div v-else class="qr-placeholder">
-              <Icon :name="qrState === 'unsupported' ? 'x' : qrState === 'error' ? 'refresh' : 'user'" :size="26" />
+              <Icon
+                :name="qrState === 'unsupported' ? 'x' : qrState === 'error' ? 'refresh' : qrState === 'needServer' ? 'globe' : 'user'"
+                :size="26"
+              />
               <span>{{ qrPlaceholderText }}</span>
             </div>
           </div>
@@ -243,12 +260,12 @@ onBeforeUnmount(() => {
         </form>
       </div>
 
-      <ServerPicker :on-changed="onServerChanged" />
+      <ServerPicker :on-changed="onServerChanged" :on-pending="onServerPending" />
 
       <div class="login-tip">账号由管理员在后台创建</div>
     </div>
 
-    <button class="icon-btn" type="button" style="position: absolute; right: 18px; top: 18px" @click="onThemeToggle">
+    <button class="icon-btn login-theme-btn" type="button" @click="onThemeToggle">
       <Icon :name="theme.theme === 'dark' ? 'sun' : 'moon'" />
     </button>
   </div>

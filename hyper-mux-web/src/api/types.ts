@@ -161,3 +161,53 @@ export interface QrStatusResult {
   state: 'PENDING' | 'SCANNED' | 'CONFIRMED' | 'EXPIRED'
   session: LoginResult | null
 }
+
+/* ---------- 远程投屏（契约 §3.13）：web 端 = 接收端 ---------- */
+
+/** GET /devices：同账号设备（online = 最近 30s 内有心跳，服务端内存判定） */
+export interface CastDevice {
+  deviceId: string
+  platform: string
+  deviceName: string | null
+  online: boolean
+  lastSeen: number
+  casting: boolean
+}
+
+/** GET /cast/poll 的 pending 载荷（确认弹窗直接渲染，不需要再查详情） */
+export interface CastPending {
+  id: number
+  senderDeviceId: string
+  senderName: string | null
+  movieId: number
+  videoId: number
+  movieTitle: string | null
+  episodeLabel: string | null
+  coverUrl: string | null
+  positionMs: number
+  expireTime: number
+  confirmSeconds: number
+}
+
+export interface CastPollResult {
+  pending: CastPending | null
+  cancelledIds: number[]
+  confirmSeconds: number
+}
+
+/** POST /cast/accept 的应答（据此导航到播放页并 seek 到 positionMs） */
+export interface CastAccepted {
+  id: number
+  movieId: number
+  videoId: number
+  positionMs: number
+  movieTitle: string | null
+  episodeLabel: string | null
+}
+
+export interface CastConfig {
+  enabled: boolean
+  confirmSeconds: number
+  requestTtlSeconds: number
+  pollIntervalMs: number
+}

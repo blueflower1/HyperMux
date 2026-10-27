@@ -6,7 +6,7 @@ const route = useRoute()
 const router = useRouter()
 
 const tabs = [
-  { to: '/', name: 'home', icon: 'home', label: '首页' },
+  { to: '/home', name: 'home', icon: 'home', label: '首页' },
   { to: '/history', name: 'history', icon: 'history', label: '历史' },
   { to: '/me', name: 'me', icon: 'user', label: '我的' },
 ]

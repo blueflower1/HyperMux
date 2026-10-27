@@ -27,7 +27,10 @@ export function getExp(): number {
 function handleUnauthorized() {
   const user = useUserStore()
   user.clear()
-  if (!location.hash.startsWith('#/login')) {
+  // 落地页/裸地址是公开页：401 不劫持跳转（清掉失效 token 即可）
+  const h = location.hash
+  if (!h || h === '#' || h === '#/') return
+  if (!h.startsWith('#/login')) {
     location.hash = '#/login'
   }
 }

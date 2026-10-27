@@ -2,8 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
+import DownloadPanel from '@/components/DownloadPanel.vue'
 import { useThemeStore } from '@/stores/theme'
 import { useUserStore } from '@/stores/user'
+import { isDesktop } from '@/stores/desktop'
+import { liveTasks } from '@/stores/download'
 
 const router = useRouter()
 const theme = useThemeStore()
@@ -12,13 +15,18 @@ const user = useUserStore()
 const userMenuOpen = ref(false)
 const menuEl = ref<HTMLElement | null>(null)
 
+/* 桌面端下载面板（右上角） */
+const desktop = isDesktop()
+const dlOpen = ref(false)
+const dlEl = ref<HTMLElement | null>(null)
+
 const initials = computed(() => {
   const n = user.user?.nickName || user.user?.username || '?'
   return n.trim().slice(0, 1)
 })
 
 function onLogo() {
-  router.push('/')
+  router.push('/home')
 }
 
 function onThemeToggle(e: MouseEvent) {
@@ -36,6 +44,9 @@ function onDocClick(e: MouseEvent) {
   if (menuEl.value && !menuEl.value.contains(e.target as Node)) {
     userMenuOpen.value = false
   }
+  if (dlEl.value && !dlEl.value.contains(e.target as Node)) {
+    dlOpen.value = false
+  }
 }
 
 onMounted(() => document.addEventListener('click', onDocClick))
@@ -51,6 +62,20 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
       </button>
 
       <div class="topbar-right">
+        <div v-if="desktop" class="dl-wrap" ref="dlEl">
+          <button
+            class="icon-btn"
+            type="button"
+            title="下载"
+            :class="{ 'is-active': dlOpen || liveTasks.length > 0 }"
+            @click="dlOpen = !dlOpen"
+          >
+            <Icon name="download" :size="17" />
+            <span v-if="liveTasks.length" class="dl-badge">{{ liveTasks.length }}</span>
+          </button>
+          <DownloadPanel v-if="dlOpen" @close="dlOpen = false" />
+        </div>
+
         <button
           class="icon-btn"
           type="button"

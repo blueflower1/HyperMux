@@ -15,7 +15,7 @@ const activeCategory = computed(() => (route.name === 'category' ? route.params.
 <template>
   <aside class="sidebar">
     <nav class="side-nav">
-      <router-link class="side-item" to="/" :class="{ active: route.name === 'home' }">
+      <router-link class="side-item" to="/home" :class="{ active: route.name === 'home' }">
         <Icon name="home" :size="18" /> 首页
       </router-link>
       <router-link class="side-item" to="/history" :class="{ active: route.name === 'history' }">

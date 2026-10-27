@@ -9,7 +9,7 @@ const router = useRouter()
   <div class="notfound">
     <h1>404</h1>
     <p>页面走丢了</p>
-    <button class="btn btn-primary" @click="router.push('/')">
+    <button class="btn btn-primary" @click="router.push('/home')">
       <Icon name="home" :size="15" /> 回首页
     </button>
   </div>

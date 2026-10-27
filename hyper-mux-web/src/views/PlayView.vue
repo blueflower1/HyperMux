@@ -6,6 +6,9 @@ import Icon from '@/components/Icon.vue'
 import { finishProgress, getMovieDetail, getMovieSeasons, getPlayUrl, reportProgress } from '@/api'
 import { getToken, errMsg } from '@/api/http'
 import { apiBase } from '@/stores/server'
+import { isDesktop } from '@/stores/desktop'
+import { playLocal, recordOf } from '@/stores/download'
+import { cancelActiveCast, castActive, castPending, onCastStopped } from '@/stores/cast'
 import type { MovieDetail, Season, VideoItem } from '@/api/types'
 import { useToastStore } from '@/stores/toast'
 import { fmtSec, progressPct } from '@/utils/format'
@@ -28,6 +31,21 @@ const metaLoading = ref(true)
 const flat = computed(() => seasons.value.flatMap((s) => s.videos.map((v) => ({ v, s: s.seasonNo }))))
 const currentVideo = computed(() => flat.value.find((f) => f.v.id === videoId.value)?.v || null)
 
+/* ---------- 已下载集的本地播放（桌面端） ---------- */
+const localRecord = computed(() =>
+  currentVideo.value ? recordOf(movieId.value, currentVideo.value.id) || null : null
+)
+
+async function playLocalNow() {
+  if (!localRecord.value) return
+  try {
+    await playLocal(localRecord.value)
+    toast.show('已在本地播放核心打开')
+  } catch (e) {
+    toast.error('本地播放失败：' + errMsg(e))
+  }
+}
+
 /* ---------- 播放器 ---------- */
 // 注意：artplayer 会直接覆写 container.innerHTML，
 // 必须用独立子节点承载播放器，不能与 Vue 管理的 overlay 节点共用容器
@@ -36,10 +54,67 @@ let player: ArtPlayer | null = null
 const playState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorText = ref('')
 let resumePendingMs = 0
+let resumeFromCast = false
 let seekDone = false
 let autoNextTimer: number | undefined
 let reportTimer: number | undefined
 let eventCleanups: Array<() => void> = []
+let offCastStopped: (() => void) | undefined
+
+/* ---------- 投屏（web 端 = 接收端） ---------- */
+
+/** 手机端送来的起播位置（App.vue 接受投屏时写进 query），优先于该集的服务端断点 */
+function castPosMs(): number | null {
+  const q = route.query.castPos
+  const raw = Array.isArray(q) ? q[0] : q
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+}
+
+/** 投屏被手机端取消 / 被同账号其它设备接管：停播并回影片页 */
+function onCastStoppedByPeer() {
+  if (autoNextTimer) {
+    clearTimeout(autoNextTimer)
+    autoNextTimer = undefined
+  }
+  reportNow() // 先把最后位置落库再拆播放器，否则手机下次播这集会从头开始
+  destroyPlayer()
+  playState.value = 'idle'
+  toast.show('投屏已结束：手机端已取消，或被同账号其它设备接管')
+  router.push(`/movie/${movieId.value}`)
+}
+
+/* ---------- 桌面壳 mpv 解码兜底（仅 Tauri 环境） ---------- */
+const isDesktopShell = isDesktop()
+let lastPlayUrl = ''
+let lastPlayHeaders: Record<string, string> = {}
+
+async function playWithMpv() {
+  if (!lastPlayUrl) return
+  try {
+    const { Command } = await import('@tauri-apps/plugin-shell')
+    const args = [lastPlayUrl, '--force-window', '--autofit=70%', '--title=HyperMux 本地解码']
+    for (const [k, v] of Object.entries(lastPlayHeaders || {})) {
+      args.push(`--http-header-fields=${k}: ${v}`)
+    }
+    await Command.sidecar('binaries/mpv', args).execute()
+    toast.show('已用本地解码核心打开')
+  } catch (e) {
+    toast.error('本地解码核心启动失败：' + errMsg(e))
+  }
+}
+
+/** 播放页存续期间开启 Rust 侧关闭双击确认（对齐 TV 端 BACK 防误触） */
+async function setCloseGuard(on: boolean) {
+  if (!isDesktopShell) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('set_close_guard', { enabled: on })
+  } catch {
+    /* 非桌面或命令不可用：忽略 */
+  }
+}
 
 // 按住快放（移动端）：单指按住 260ms → 2 倍速，松开还原
 const holdFast = ref(false)
@@ -124,6 +199,7 @@ function startPlayback() {
 
 /* ---------- 键盘快捷键（页面级，不依赖播放器焦点） ---------- */
 function onKeydown(e: KeyboardEvent) {
+  if (castPending.value) return // 投屏确认弹窗在屏幕上：快捷键让给它（CastConfirmDialog 捕获 Enter/Esc）
   const t = e.target as HTMLElement | null
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -241,14 +317,26 @@ async function play(video: VideoItem) {
   errorText.value = ''
   seekDone = false
 
-  // 该集服务端断点
+  // 起播位置：投屏送来的位置优先于该集的服务端断点（与 TV 端 castResumeMs 同语义）
+  const castPos = castPosMs()
   const prog = video.progress
-  resumePendingMs = prog && prog.finished !== 1 && prog.positionMs > 30_000 ? prog.positionMs : 0
+  resumeFromCast = castPos != null
+  resumePendingMs = castPos ?? (prog && prog.finished !== 1 && prog.positionMs > 30_000 ? prog.positionMs : 0)
+  if (castPos != null) {
+    // 用完即从 query 抹掉：否则切下一集时它会被当成"下一集的投屏位置"、从上一集的秒数起播
+    const q = { ...route.query }
+    delete q.castPos
+    void router.replace({ query: q })
+  }
 
   let url = ''
+  lastPlayUrl = ''
+  lastPlayHeaders = {}
   try {
     const pu = await getPlayUrl(video.id)
     url = pu.url
+    lastPlayUrl = url
+    lastPlayHeaders = pu.headers || {}
   } catch (e) {
     playState.value = 'error'
     errorText.value = errMsg(e)
@@ -300,7 +388,7 @@ async function play(video: VideoItem) {
     const onSeeked = () => {
       if (seekTimeout) clearTimeout(seekTimeout)
       p.off('video:seeked', onSeeked)
-      if (resumePendingMs) toast.show('已定位到上次播放位置')
+      if (resumePendingMs) toast.show(resumeFromCast ? '已从手机端的位置继续播放' : '已定位到上次播放位置')
       startPlayback()
     }
     p.on('video:seeked', onSeeked)
@@ -347,6 +435,8 @@ function onEnded() {
   const id = videoId.value
   reportNow(1)
   if (id) finishProgress(id, 'finish').catch(() => {})
+  // 投屏的这一集自然播完：主动收尾。否则服务端要等 accepted-ttl 才 CLOSED，手机端一直挂着「已投送至」
+  if (castActive.value) cancelActiveCast()
   const idx = flat.value.findIndex((f) => f.v.id === id)
   const next = idx >= 0 ? flat.value[idx + 1] : null
   toast.show(next ? '本集已看完，即将播放下一集' : '播放结束')
@@ -397,6 +487,13 @@ function onRetry() {
   if (v) play(v)
 }
 
+/** 播放页手动结束投屏：手机端那边的「已投送至」卡立刻收掉，本机继续正常播放 */
+function endCast() {
+  if (!castActive.value) return
+  cancelActiveCast()
+  toast.show('已结束投屏，本机继续播放')
+}
+
 function epState(v: VideoItem): string {
   if (v.id === videoId.value) return 'is-playing'
   if (!v.progress) return ''
@@ -438,12 +535,19 @@ function pickDefault() {
 
 watch(movieId, async (_id, old) => {
   if (old == null) return // 首次加载由 onMounted 处理
-  // 切到另一部影片：停播并重新选集
+  // 切到另一部影片：停播并重新选集。
+  // 只有「离开的是投屏那一集」才收尾 —— 接受投屏后导航进来时 castActive 指向的就是新影片，不能把自己取消掉
+  const a = castActive.value
+  if (a && a.movieId !== _id) cancelActiveCast()
   destroyPlayer()
   playState.value = 'idle'
   errorText.value = ''
   await loadMeta()
-  if (!currentVideo.value) pickDefault()
+  // URL 已带新影片的 videoId 时直接起播：watch(videoId) 那一跳发生在元数据回来之前（currentVideo 还是旧影片的），
+  // 它拿到 null 就什么都不做，靠 pickDefault 又不会触发 —— 必须在这里补一次
+  const v = currentVideo.value
+  if (v) play(v)
+  else pickDefault()
 })
 
 watch(videoId, (id) => {
@@ -451,6 +555,9 @@ watch(videoId, (id) => {
 })
 
 onMounted(async () => {
+  setCloseGuard(true)
+  // 投屏被手机端取消 / 被同账号其它设备接管 → 停播并回影片页
+  offCastStopped = onCastStopped(onCastStoppedByPeer)
   reportTimer = window.setInterval(() => {
     // 播放中每 10s 上报一次
     const v = vid()
@@ -475,6 +582,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  setCloseGuard(false)
+  offCastStopped?.()
+  offCastStopped = undefined
+  // 离开播放页 = 投屏结束（与 TV 端 BACK 退出投屏播放页同一口径），手机端 ≤5s 内看到状态清掉
+  cancelActiveCast()
   if (reportTimer) {
     clearInterval(reportTimer)
     reportTimer = undefined
@@ -500,6 +612,18 @@ onBeforeUnmount(() => {
         <template v-if="detail">{{ detail.title }}<span v-if="currentVideo" class="ep-tag">第{{ currentVideo.episodeNo }} 集</span></template>
         <template v-else>加载中…</template>
       </div>
+      <div v-if="castActive" class="cast-badge" :title="`来自「${castActive.from}」的投屏`">
+        <Icon name="tv" :size="14" /> 投屏播放中
+      </div>
+      <button
+        v-if="isDesktopShell && localRecord"
+        class="btn btn-sm"
+        type="button"
+        title="该集已下载，用本地播放核心打开"
+        @click="playLocalNow"
+      >
+        <Icon name="play" :size="12" /> 本地播放
+      </button>
       <button
         class="icon-btn"
         type="button"
@@ -519,9 +643,26 @@ onBeforeUnmount(() => {
       <div v-else-if="playState === 'error'" class="player-state">
         <div class="err-ic"><Icon name="x" :size="22" /></div>
         <div style="max-width: 420px">{{ errorText || '播放失败' }}</div>
-        <button v-if="currentVideo" class="btn" style="border-color: rgba(255,255,255,.25); color: #dfe3ee" @click="onRetry">
-          重试
-        </button>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center">
+          <button v-if="currentVideo" class="btn" style="border-color: rgba(255,255,255,.25); color: #dfe3ee" @click="onRetry">
+            重试
+          </button>
+          <button
+            v-if="isDesktopShell && lastPlayUrl"
+            class="btn btn-primary"
+            @click="playWithMpv"
+          >
+            用本地解码核心播放
+          </button>
+          <button
+            v-if="isDesktopShell && localRecord"
+            class="btn"
+            style="border-color: rgba(255,255,255,.25); color: #dfe3ee"
+            @click="playLocalNow"
+          >
+            播放已下载版本
+          </button>
+        </div>
       </div>
       <div v-if="holdFast" class="hold-badge">2x 快放中</div>
     </div>
@@ -535,6 +676,9 @@ onBeforeUnmount(() => {
       </button>
       <button v-if="currentVideo" class="btn" @click="markFinished">
         <Icon name="check" :size="15" /> 标记看完
+      </button>
+      <button v-if="castActive" class="btn cast-end" type="button" @click="endCast">
+        <Icon name="x" :size="14" /> 结束投屏
       </button>
     </div>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
 import {
   PRESET_URL,
@@ -11,18 +11,23 @@ import {
   type ServerMode,
 } from '@/stores/server'
 
-/** 档位变化（含自定义保存）后回调：父级重启扫码引擎 */
-const props = defineProps<{ onChanged?: () => void }>()
+/** 档位变化（含自定义保存）后回调：父级清会话并重启扫码引擎；pending = 选了自定义但还没保存地址 */
+const props = defineProps<{ onChanged?: () => void; onPending?: () => void }>()
 
 const draft = ref(customUrl.value)
-const showCustomInput = ref(false)
+const showCustomInput = ref(serverMode.value === 'custom' && !customUrl.value)
 const inputError = ref('')
+
+/** 档位高亮：自定义被点开（即使还没保存）也算选中，避免"点了没反应"的观感 */
+const presetActive = computed(() => serverMode.value === 'preset' && !showCustomInput.value)
+const customActive = computed(() => serverMode.value === 'custom' || showCustomInput.value)
 
 function pick(mode: ServerMode) {
   inputError.value = ''
   if (mode === 'custom' && !customUrl.value) {
-    // 还没保存过自定义地址：先展开输入框，保存成功后才切档
+    // 还没保存过自定义地址：展开输入框、通知父级暂停扫码（保存成功后才恢复）
     showCustomInput.value = true
+    props.onPending?.()
     return
   }
   showCustomInput.value = mode === 'custom'
@@ -48,10 +53,10 @@ function save() {
     <div class="server-picker-head">
       <span class="server-picker-label"><Icon name="globe" :size="15" /> 服务器</span>
       <div class="seg">
-        <button v-if="PRESET_URL" type="button" :class="{ active: serverMode === 'preset' }" @click="pick('preset')">
+        <button v-if="PRESET_URL" type="button" :class="{ active: presetActive }" @click="pick('preset')">
           公共服务器
         </button>
-        <button type="button" :class="{ active: serverMode === 'custom' }" @click="pick('custom')">自定义</button>
+        <button type="button" :class="{ active: customActive }" @click="pick('custom')">自定义</button>
       </div>
     </div>
 

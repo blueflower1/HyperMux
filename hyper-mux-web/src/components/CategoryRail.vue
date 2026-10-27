@@ -3,6 +3,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
 import MovieCard from '@/components/MovieCard.vue'
+import RailScroller from '@/components/RailScroller.vue'
 import { getCategoryMovies } from '@/api'
 import type { CategoryItem, MovieCard as MovieCardT } from '@/api/types'
 
@@ -58,17 +59,17 @@ onBeforeUnmount(() => io?.disconnect())
       </router-link>
     </div>
 
-    <div v-if="loading" class="rail" style="gap: 14px">
-      <div v-for="n in 6" :key="n" class="skeleton-card card" />
-    </div>
-    <div v-else-if="movies.length" class="rail">
-      <div v-for="m in movies" :key="m.id" class="rail-card">
-        <MovieCard :movie="m" rail />
-      </div>
-    </div>
-    <div v-else class="rail">
-      <div class="empty-card">{{ failed ? '加载失败' : '暂无内容' }}</div>
-    </div>
+    <RailScroller>
+      <template v-if="loading">
+        <div v-for="n in 6" :key="n" class="skeleton-card card" />
+      </template>
+      <template v-else-if="movies.length">
+        <div v-for="m in movies" :key="m.id" class="rail-card">
+          <MovieCard :movie="m" rail />
+        </div>
+      </template>
+      <div v-else class="empty-card">{{ failed ? '加载失败' : '暂无内容' }}</div>
+    </RailScroller>
   </section>
 </template>
 
