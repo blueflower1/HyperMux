@@ -36,7 +36,7 @@ public class AppUpdateController {
 
     /**
      * 检查更新：仅当该平台最新发布 versionCode &gt; [code] 时返回 200 + 更新信息；
-     * 无更新（未发布 / 已最新）→ 204。客户端传自身 versionCode，平台 mobile/tv。
+     * 无更新（未发布 / 已最新）→ 204。客户端传自身 versionCode，平台 mobile/tv/windows。
      */
     @GetMapping("/check")
     public ResponseEntity<R<TvVos.UpdateCheckVo>> check(@RequestParam("code") int code,
@@ -59,8 +59,11 @@ public class AppUpdateController {
     public ResponseEntity<StreamingResponseBody> download(
             @RequestParam(value = "platform", defaultValue = "mobile") String platform) {
         AppReleaseService.ReleasePackage pkg = releaseService.resolvePackage(platform);
+        String contentType = "windows".equalsIgnoreCase(platform)
+                ? "application/octet-stream"
+                : "application/vnd.android.package-archive";
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("application/vnd.android.package-archive"))
+                .contentType(MediaType.parseMediaType(contentType))
                 .contentLength(pkg.sizeBytes())
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + pkg.downloadName() + "\"")
                 .cacheControl(CacheControl.noCache())

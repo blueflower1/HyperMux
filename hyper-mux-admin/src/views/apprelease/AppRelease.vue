@@ -21,6 +21,7 @@ import AppReleaseCard from '@/components/AppReleaseCard.vue'
     <div class="grid">
       <AppReleaseCard platform="mobile" title="Mobile（手机 App）" />
       <AppReleaseCard platform="tv" title="TV（预留，复用同一套接口）" />
+      <AppReleaseCard platform="windows" title="Windows（桌面客户端）" />
     </div>
   </div>
 </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 应用自更新卡片（契约 §3.11）：展示平台当前发布 + 上传新版本表单。
- * mobile / tv 各渲染一张，互不影响；每平台仅保留最新一条，发布即覆盖。
+ * mobile / tv / windows 各渲染一张，互不影响；每平台仅保留最新一条，发布即覆盖。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
@@ -25,8 +25,11 @@ import CopyableText from './CopyableText.vue'
 import EmptyState from './EmptyState.vue'
 import TimeText from './TimeText.vue'
 
-const props = defineProps<{ platform: 'mobile' | 'tv'; title: string }>()
+const props = defineProps<{ platform: 'mobile' | 'tv' | 'windows'; title: string }>()
 const message = useMessage()
+
+/** 平台对应更新包扩展名（与服务端 AppReleaseService.extFor 一致） */
+const fileExt = computed(() => (props.platform === 'windows' ? '.exe' : '.apk'))
 
 const loading = ref(false)
 const publishing = ref(false)
@@ -68,12 +71,12 @@ function onFileChange(e: Event) {
   const f = input.files?.[0]
   input.value = ''
   if (!f) return
-  if (!f.name.toLowerCase().endsWith('.apk')) {
-    message.error('仅支持 .apk 文件')
+  if (!f.name.toLowerCase().endsWith(fileExt.value)) {
+    message.error(`仅支持 ${fileExt.value} 文件`)
     return
   }
   if (f.size > 300 * 1024 * 1024) {
-    message.error('APK 超过 300MB 上限')
+    message.error('安装包超过 300MB 上限')
     return
   }
   file.value = f
@@ -82,7 +85,7 @@ function onFileChange(e: Event) {
 async function publish() {
   if (!file.value) return
   if (!form.versionCode || form.versionCode < 1) {
-    message.warning('请填写 versionCode（整数，须大于当前已发布值）')
+    message.warning('请填写 versionCode（整数，不得低于当前已发布值；同号为覆盖发布）')
     return
   }
   if (!form.versionName.trim()) {
@@ -171,15 +174,15 @@ const canPublish = computed(
     <!-- 发布新版本 -->
     <div class="form-title">发布新版本</div>
     <NForm label-placement="top" require-asterisk="optional">
-      <NFormItem label="APK 文件">
+      <NFormItem :label="fileExt === '.exe' ? '安装包文件' : 'APK 文件'">
         <NButton size="small" :disabled="publishing" @click="pickFile">
-          {{ file ? `已选择：${file.name}` : '选择 APK' }}
+          {{ file ? `已选择：${file.name}` : `选择 ${fileExt === '.exe' ? '安装包' : 'APK'}` }}
         </NButton>
         <span v-if="file" class="file-size">{{ fmtSize(file.size) }}</span>
         <input
           ref="fileInput"
           type="file"
-          accept=".apk"
+          :accept="fileExt"
           class="file-input"
           @change="onFileChange"
         />

@@ -28,7 +28,12 @@ import java.util.List;
 public class AppReleaseService {
 
     /** 支持的平台（表主键白名单，防任意文件命名） */
-    public static final List<String> PLATFORMS = List.of("mobile", "tv");
+    public static final List<String> PLATFORMS = List.of("mobile", "tv", "windows");
+
+    /** 平台 → 更新包扩展名（windows 为 NSIS 安装包 .exe，其余 .apk） */
+    public static String extFor(String platform) {
+        return "windows".equals(platform) ? ".exe" : ".apk";
+    }
 
     private static final long MAX_APK_BYTES = 300L * 1024 * 1024;
 
@@ -54,16 +59,17 @@ public class AppReleaseService {
     public AppReleaseEntity publish(String platform, MultipartFile file, int versionCode,
                                     String versionName, String releaseNotes, boolean mandatory) {
         String p = normalizePlatform(platform);
+        String ext = extFor(p);
         if (file == null || file.isEmpty()) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "APK 文件不能为空");
+            throw new BizException(ErrorCode.BAD_REQUEST, "更新包文件不能为空");
         }
         String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        if (!original.endsWith(".apk")) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "仅支持 .apk 文件");
+        if (!original.endsWith(ext)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "该平台仅支持 " + ext + " 文件");
         }
         long size = file.getSize();
         if (size > MAX_APK_BYTES) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "APK 超过 300MB 上限");
+            throw new BizException(ErrorCode.BAD_REQUEST, "更新包超过 300MB 上限");
         }
         String vName = versionName == null ? "" : versionName.trim();
         if (vName.isEmpty() || vName.length() > 32) {
@@ -74,18 +80,19 @@ public class AppReleaseService {
         }
 
         AppReleaseEntity existing = mapper.selectById(p);
-        if (existing != null && existing.getVersionCode() != null && versionCode <= existing.getVersionCode()) {
+        if (existing != null && existing.getVersionCode() != null && versionCode < existing.getVersionCode()) {
             throw new BizException(ErrorCode.CONFLICT,
-                    "新版本号必须大于当前已发布版本（当前 " + existing.getVersionCode() + "）");
+                    "versionCode 不能低于当前已发布版本（当前 " + existing.getVersionCode()
+                            + "）；同号视为覆盖发布");
         }
 
-        String fileName = p + "-latest.apk";
+        String fileName = p + "-latest" + ext;
         Path dir;
         try {
             dir = Path.of(props.getDir());
             Files.createDirectories(dir);
         } catch (IOException e) {
-            throw new UncheckedIOException("APK 目录不可用: " + props.getDir(), e);
+            throw new UncheckedIOException("更新包目录不可用: " + props.getDir(), e);
         }
         Path target = dir.resolve(fileName);
         Path tmp = dir.resolve(fileName + ".uploading");
@@ -101,7 +108,7 @@ public class AppReleaseService {
             }
         } catch (IOException e) {
             deleteQuietly(tmp);
-            throw new BizException(ErrorCode.INTERNAL, "APK 保存失败: " + e.getMessage());
+            throw new BizException(ErrorCode.INTERNAL, "更新包保存失败: " + e.getMessage());
         }
 
         AppReleaseEntity entity = existing != null ? existing : new AppReleaseEntity();
@@ -125,17 +132,18 @@ public class AppReleaseService {
         return entity;
     }
 
-    /** App 侧下载：返回文件路径 + 展示文件名（{hypermux-platform-versionName.apk}）。记录或文件缺失 → 404。 */
+    /** App 侧下载：返回文件路径 + 展示文件名（{hypermux-platform-versionName.ext}）。记录或文件缺失 → 404。 */
     public ReleasePackage resolvePackage(String platform) {
         AppReleaseEntity entity = latest(platform);
         if (entity == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "该平台暂未发布更新包");
         }
+        String ext = extFor(entity.getPlatform());
         Path file = Path.of(props.getDir()).normalize().resolve(entity.getFileName());
-        if (!file.getFileName().toString().endsWith(".apk") || !Files.isRegularFile(file)) {
+        if (!file.getFileName().toString().endsWith(ext) || !Files.isRegularFile(file)) {
             throw new BizException(ErrorCode.NOT_FOUND, "更新包文件不存在，请重新发布");
         }
-        String downloadName = "hypermux-" + entity.getPlatform() + "-" + entity.getVersionName() + ".apk";
+        String downloadName = "hypermux-" + entity.getPlatform() + "-" + entity.getVersionName() + ext;
         return new ReleasePackage(file, sizeQuietly(file, entity.getSizeBytes()), downloadName);
     }
 

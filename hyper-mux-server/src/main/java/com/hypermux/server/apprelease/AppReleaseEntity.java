@@ -19,7 +19,7 @@ public class AppReleaseEntity {
     @TableId(value = "platform", type = IdType.INPUT)
     private String platform;
 
-    /** Android versionCode（比较用，发布时强制递增） */
+    /** Android versionCode（比较用，发布时不得低于当前值；同号 = 覆盖发布同一版本） */
     private Integer versionCode;
 
     /** versionName（展示用） */
