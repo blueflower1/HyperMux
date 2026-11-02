@@ -172,7 +172,7 @@ public class MovieAdminService {
         List<AdminVos.TagRef> tags = tagsOf(List.of(id)).getOrDefault(id, List.of());
         return new AdminVos.MovieDetailVo(m.getId(), m.getTitle(), m.getOriginalTitle(), m.getCategoryId(),
                 m.getYear(), m.getCoverUrl(), m.getBackdropUrl(), toDouble(m.getRating()), m.getArea(),
-                m.getLanguage(), m.getIntro(), m.getSortNo(), m.getSourceId(), m.getStatus(), tags);
+                m.getLanguage(), m.getIntro(), m.getSortNo(), m.getSourceId(), m.getSourcePath(), m.getStatus(), tags);
     }
 
     // ==================== 新建 / 更新 ====================

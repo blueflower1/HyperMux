@@ -29,6 +29,7 @@ import CoverUploader from '@/components/CoverUploader.vue'
 import ImagePicker from '@/components/ImagePicker.vue'
 import { imgUrl } from '@/utils/image'
 import EpisodeTable from '@/components/EpisodeTable.vue'
+import EpisodeImportModal from '@/components/EpisodeImportModal.vue'
 import RatingInput from '@/components/RatingInput.vue'
 import TagPicker from '@/components/TagPicker.vue'
 import MetadataScrape from '@/components/MetadataScrape.vue'
@@ -115,7 +116,9 @@ async function openImportPicker() {
     const r = await openlistApi.session({ sourceId: sid })
     pickerSessionId.value = r.sessionId
     const src = sources.value.find((s) => s.id === sid)
-    pickerInitialPath.value = src?.rootPath || '/'
+    // 已保存影片：优先落在记录的影片目录，一步就能重新扫全集补充缺失集
+    const movieDir = !isNew.value && importSourcePath.value && sid === form.sourceId ? importSourcePath.value : null
+    pickerInitialPath.value = movieDir || src?.rootPath || '/'
     pickerVisible.value = true
   } catch (e) {
     message.error(errMsg(e))
@@ -148,14 +151,82 @@ async function onImportPick(path: string) {
   importing.value = true
   try {
     const r = await openlistApi.importFolder(sid, path)
-    applyImport(r)
-    const extra = r.skippedDirs > 0 ? `，${r.skippedDirs} 个子目录不可读已跳过` : ''
-    message.success(`已从目录解析 ${r.episodes.length} 集${r.parsed ? '' : '（片名未含年份，请手动补充）'}${extra}`)
+    if (isNew.value) {
+      applyImport(r)
+      const extra = r.skippedDirs > 0 ? `，${r.skippedDirs} 个子目录不可读已跳过` : ''
+      message.success(`已从目录解析 ${r.episodes.length} 集${r.parsed ? '' : '（片名未含年份，请手动补充）'}${extra}`)
+    } else {
+      // 已保存影片：与初始化同一套目录解析，但只补缺失的（季,集），既有剧集不动
+      const { added, skipped } = mergeImport(r)
+      if (added) {
+        message.success(
+          `目录解析 ${r.episodes.length} 集：新增 ${added} 集${skipped ? `，跳过已有 ${skipped} 集（保持不变）` : ''}，点底部「保存」提交`,
+        )
+      } else {
+        message.info(`目录解析 ${r.episodes.length} 集，与当前剧集完全一致，没有可新增的集`)
+      }
+    }
   } catch (e) {
     message.error(errMsg(e))
   } finally {
     importing.value = false
   }
+}
+
+/** 已保存影片的目录合并：只 append 新 (季,集) 行（相对路径按源根记录） */
+function mergeImport(r: MovieImportVo): { added: number; skipped: number } {
+  if (form.sourceId == null) form.sourceId = r.sourceId
+  const seen = new Set(rows.value.map((x) => `${x.seasonNo ?? 1}|${x.episodeNo ?? 1}`))
+  const next = [...rows.value]
+  let added = 0
+  let skipped = 0
+  for (const ep of r.episodes) {
+    const k = `${ep.seasonNo}|${ep.episodeNo}`
+    if (seen.has(k)) {
+      skipped++
+      continue
+    }
+    seen.add(k)
+    next.push(
+      makeRow({ seasonNo: ep.seasonNo, episodeNo: ep.episodeNo, title: ep.title ?? '', url: ep.relPath, size: ep.size }),
+    )
+    added++
+  }
+  rows.value = next
+  return { added, skipped }
+}
+
+// ==================== 批量导入（粘贴链接，服务端直接追加） ====================
+
+const textImportVisible = ref(false)
+
+const usedSeasons = computed(() =>
+  [...new Set(rows.value.map((r) => r.seasonNo ?? 1))].sort((a, b) => a - b),
+)
+const usedEpisodes = computed(() =>
+  rows.value.map((r) => ({ seasonNo: r.seasonNo ?? 1, episodeNo: r.episodeNo ?? 1 })),
+)
+
+function openTextImport() {
+  if (movieId.value == null) {
+    message.warning('请先保存影片，再批量导入剧集')
+    return
+  }
+  if (dirty.value) {
+    dialog.warning({
+      title: '有未保存的修改',
+      content: '批量导入会直接写入服务端并刷新本页，页面上未保存的修改将丢失。继续导入？',
+      positiveText: '继续导入',
+      negativeText: '取消',
+      onPositiveClick: () => (textImportVisible.value = true),
+    })
+    return
+  }
+  textImportVisible.value = true
+}
+
+async function onTextImported() {
+  await load()
 }
 
 // ==================== 刮削元数据 ====================
@@ -277,6 +348,7 @@ async function load() {
     form.backdropUrl = d.backdropUrl ?? ''
     form.tagIds = (d.tags ?? []).map((t) => t.id)
     form.sourceId = d.sourceId ?? null
+    importSourcePath.value = d.sourcePath ?? null
     status.value = (d.status as 'PUBLISHED' | 'DRAFT' | 'OFF') ?? 'DRAFT'
     rows.value = v.list.map(rowFromVideo)
     snapshot()
@@ -568,10 +640,12 @@ function goBack() {
         </div>
       </section>
 
-      <!-- 从 OpenList 导入（仅新建） -->
-      <NCard v-if="isNew" size="small" :bordered="false" class="hm-card import-card">
+      <!-- 从 OpenList 导入：新建 = 全量自动填充；已保存 = 按同一套解析规则批量补剧集 -->
+      <NCard size="small" :bordered="false" class="hm-card import-card">
         <template #header>
-          <span class="sec-title"><span class="bar"></span>从 OpenList 导入</span>
+          <span class="sec-title">
+            <span class="bar"></span>{{ isNew ? '从 OpenList 导入' : '从 OpenList 批量补剧集' }}
+          </span>
         </template>
         <div class="import-row">
           <NSelect
@@ -583,13 +657,16 @@ function goBack() {
           />
           <NButton type="primary" :loading="importing" :disabled="!sources.length" @click="openImportPicker">
             <template #icon><CloudOutline /></template>
-            选择目录并自动填充
+            {{ isNew ? '选择目录并自动填充' : '选择目录并补充缺失剧集' }}
           </NButton>
-          <NText depth="3" style="font-size: 12px">
+          <NText v-if="isNew" depth="3" style="font-size: 12px">
             进入影片目录（含其下季/清晰度子目录）后选择，将自动解析片名、年份与全部剧集
           </NText>
+          <NText v-else depth="3" style="font-size: 12px">
+            选影片目录重新解析全部剧集，只追加缺少的 (季,集)；已有剧集保持不变，确认后点「保存」提交
+          </NText>
         </div>
-        <NAlert v-if="importSourcePath" type="success" :bordered="false" class="import-done">
+        <NAlert v-if="isNew && importSourcePath" type="success" :bordered="false" class="import-done">
           已导入：<span class="mono">{{ importSourcePath }}</span>（共 {{ rows.length }} 集，相对路径已按所选源组装直链）
         </NAlert>
       </NCard>
@@ -695,11 +772,14 @@ function goBack() {
       <NCard size="small" :bordered="false" class="hm-card">
         <template #header>
           <div class="ep-head">
-            <span>
-              <span class="bar"></span>{{ isSingleMovie ? '正片' : `剧集（${rows.length}）` }}
-            </span>
+            <div class="ep-head-row">
+              <span>
+                <span class="bar"></span>{{ isSingleMovie ? '正片' : `剧集（${rows.length}）` }}
+              </span>
+              <NButton v-if="!isNew" size="small" secondary @click="openTextImport">批量导入（粘贴链接）</NButton>
+            </div>
             <NText depth="3" style="font-size: 12px">
-              {{ isSingleMovie ? '单文件影片（电影）：只需一行；再加一行即变为多集剧集' : '保存 = 全量替换；(季,集) 重复行标红并禁止保存' }}
+              {{ isSingleMovie ? '单文件影片（电影）：只需一行；再加一行即变为多集剧集' : '保存 = 全量替换；(季,集) 重复行标红并禁止保存；追加快可点右上「批量导入」或上方「从 OpenList 批量补剧集」' }}
             </NText>
           </div>
         </template>
@@ -769,6 +849,15 @@ function goBack() {
         title="选择影片目录"
         confirm-text="选择此目录"
         @select="onImportPick"
+      />
+      <EpisodeImportModal
+        v-if="!isNew && movieId != null"
+        v-model:show="textImportVisible"
+        :movie-id="movieId"
+        :seasons="usedSeasons"
+        :episodes="usedEpisodes"
+        :has-source="form.sourceId != null"
+        @success="onTextImported"
       />
     </div>
   </NSpin>
@@ -1036,6 +1125,12 @@ function goBack() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.ep-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .bottom-bar {
   position: sticky;

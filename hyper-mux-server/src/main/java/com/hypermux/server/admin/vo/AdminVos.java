@@ -29,7 +29,8 @@ public final class AdminVos {
 
     public record MovieDetailVo(Long id, String title, String originalTitle, Long categoryId, Integer year,
                                 String coverUrl, String backdropUrl, Double rating, String area, String language,
-                                String intro, Integer sortNo, Long sourceId, String status, List<TagRef> tags) {
+                                String intro, Integer sortNo, Long sourceId, String sourcePath, String status,
+                                List<TagRef> tags) {
     }
 
     public record VideoVo(Long id, int seasonNo, int episodeNo, String title, String urlKind,

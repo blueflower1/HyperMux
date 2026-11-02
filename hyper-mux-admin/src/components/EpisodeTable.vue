@@ -70,13 +70,15 @@ const allEditColumns: DataTableColumn<EpRow>[] = [
   {
     title: '季',
     key: 'seasonNo',
-    width: 84,
+    width: 64,
     render: (r) =>
       h(NInputNumber, {
         value: r.seasonNo,
         min: 1,
         max: 99,
         size: 'small',
+        // 表格式窄列里默认 −/+ 按钮会盖住数字（内容被遮挡），关掉按钮，键盘 ↑/↓ 仍可调
+        showButton: false,
         status: isDup(r) ? 'error' : undefined,
         'onUpdate:value': (v: number | null) => patchRow(r, { seasonNo: v }),
       }),
@@ -84,13 +86,14 @@ const allEditColumns: DataTableColumn<EpRow>[] = [
   {
     title: '集',
     key: 'episodeNo',
-    width: 92,
+    width: 76,
     render: (r) =>
       h(NInputNumber, {
         value: r.episodeNo,
         min: 1,
         max: 999,
         size: 'small',
+        showButton: false,
         status: isDup(r) ? 'error' : undefined,
         'onUpdate:value': (v: number | null) => patchRow(r, { episodeNo: v }),
       }),
@@ -98,20 +101,21 @@ const allEditColumns: DataTableColumn<EpRow>[] = [
   {
     title: '标题',
     key: 'title',
-    minWidth: 130,
+    minWidth: 150,
     render: (r) =>
       h(NInput, {
         value: r.title,
         size: 'small',
         maxlength: 191,
         placeholder: '留空显示 第N集',
+        inputProps: { title: r.title || undefined },
         'onUpdate:value': (v: string) => patchRow(r, { title: v }),
       }),
   },
   {
     title: '直链 / OpenList 路径',
     key: 'url',
-    minWidth: 300,
+    minWidth: 320,
     render: (r) =>
       h('div', { class: 'url-cell' }, [
         h(NInput, {
@@ -119,6 +123,8 @@ const allEditColumns: DataTableColumn<EpRow>[] = [
           size: 'small',
           maxlength: 1024,
           placeholder: 'https://… 或 OpenList 相对路径',
+          // 路径较长时输入框只显示片段，悬停可看完整路径
+          inputProps: { title: r.url || undefined },
           'onUpdate:value': (v: string) => patchRow(r, { url: v }),
         }),
         h(
@@ -131,12 +137,13 @@ const allEditColumns: DataTableColumn<EpRow>[] = [
   {
     title: '时长(秒)',
     key: 'duration',
-    width: 96,
+    width: 92,
     render: (r) =>
       h(NInputNumber, {
         value: r.duration,
         min: 0,
         size: 'small',
+        showButton: false,
         'onUpdate:value': (v: number | null) => patchRow(r, { duration: v }),
       }),
   },

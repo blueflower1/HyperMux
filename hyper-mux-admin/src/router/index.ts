@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { getToken } from '@/api/http'
 
 const routes = [
   {
@@ -41,8 +42,17 @@ router.beforeEach((to) => {
   const store = useUserStore()
   document.title = to.meta.title ? `${to.meta.title} · HyperMux` : 'HyperMux'
 
+  // Pinia 与 localStorage 同步：401 已清 token 或本地判定过期 → 真登出。
+  // 否则守卫会把 /login 弹回 dashboard，表现为「提示 token 无效却不踢出」。
+  const kicked = !!store.token && !store.isLoggedIn
+  if (store.token && !getToken()) store.logout()
+  else if (kicked) store.logout()
+
   if (!to.meta.public && !store.isLoggedIn) {
-    return { path: '/login', query: { redirect: to.fullPath } }
+    return {
+      path: '/login',
+      query: kicked ? { redirect: to.fullPath, expired: '1' } : { redirect: to.fullPath },
+    }
   }
   if (to.path === '/login' && store.isLoggedIn) {
     return { path: '/dashboard' }

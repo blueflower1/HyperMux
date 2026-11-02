@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
+import { NAlert, NButton, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
 import type { FormRules } from 'naive-ui'
 import { PlayOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import { useUserStore } from '@/stores/user'
@@ -58,6 +58,10 @@ async function submit(e?: Event) {
           <div class="brand-sub">TV 家庭影院 · 运营控制台</div>
         </div>
       </div>
+
+      <NAlert v-if="route.query.expired" type="warning" :bordered="false" class="expired-tip">
+        登录已过期或凭证已失效，系统已自动退出，请重新登录。
+      </NAlert>
 
       <NForm
         :model="form"
@@ -211,6 +215,10 @@ async function submit(e?: Event) {
 
 .form :deep(.n-form-item) {
   margin-bottom: 18px;
+}
+.expired-tip {
+  margin-bottom: 18px;
+  font-size: 13px;
 }
 .form :deep(.n-form-item-label__content) {
   font-size: 13px;

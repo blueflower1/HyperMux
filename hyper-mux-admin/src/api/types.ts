@@ -65,6 +65,8 @@ export interface MovieDetailVo {
   intro: string | null
   sortNo: number | null
   sourceId: number | null
+  /** 导入时记录的 OpenList 影片目录（批量补剧集时直接落回该目录） */
+  sourcePath: string | null
   status: MovieStatus
   tags: TagRef[]
 }

@@ -11,15 +11,21 @@ export function setToken(token: string) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+/** 401 统一登出事件：main.ts 监听后清 Pinia 会话并跳登录页（避免只提示不踢出） */
+export const UNAUTHORIZED_EVENT = 'hypermux:unauthorized'
+
 function clearSession() {
   setToken('')
   localStorage.removeItem('hypermux.admin.user')
+  localStorage.removeItem('hypermux.admin.expiresAt')
 }
 
 function handleUnauthorized() {
+  const hadToken = !!getToken()
   clearSession()
-  if (!location.hash.startsWith('#/login')) {
-    location.hash = '#/login'
+  // 登录态下才广播踢出事件；并发 401 只有第一个能抢到（token 已清），避免重复跳转
+  if (hadToken && !location.hash.startsWith('#/login')) {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   }
 }
 
