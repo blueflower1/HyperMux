@@ -113,7 +113,7 @@ async function doOffline(r: MovieListVo) {
 function askDelete(r: MovieListVo) {
   dialog.warning({
     title: '删除影片',
-    content: `将删除「${r.title}」及其 ${r.episodeTotal} 集剧集与相关观看断点，TV 端立即不可见，不可恢复。`,
+    content: `将删除「${r.title}」及其 ${r.episodeTotal} 集剧集、相关观看断点与「其他季」关联，TV 端立即不可见，不可恢复。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {

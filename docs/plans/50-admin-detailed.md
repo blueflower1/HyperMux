@@ -166,7 +166,13 @@ response 拦截：
 2. **剧集**（EpisodeTable，见 §6.4）：
    - 编辑已有影片：拉 `GET /movies/{id}/videos` 载入。
    - **OpenList 源关联**：当任一行直链为相对路径时，表上方出现 `NSelect sourceId`（源下拉，必选）+ 提示"相对路径将按此源组装播放直链"；全 REMOTE 时隐藏。
-3. **底部操作栏**（sticky）：左 = 未保存标记（本地脏检查），右 = `保存并发布`（新建 POST / 编辑 PUT 主信息 → 若剧集有改动再 PUT videos）/ 取消。
+3. **关联数据**（仅已保存的影片）：NDescriptions 只读（数据源 / 影片 ID / 导入目录 / 排序）+ **「其他季（关联影片）」面板**（`MovieLinksPanel`，见 §6.6）——手动建立影片↔影片的关联（库里每季各自是一条 movie 记录，movie 没有"季"字段可挂）。
+   - 添加行：远程搜索 NSelect（`multiple` + `remote` + `max-tag-count="responsive"`，`GET /movies?keyword=…&status=PUBLISHED,DRAFT,OFF`，排除本片，已关联过的候选直接禁选）+ 关系类型 NSelect + 「添加 N 条关联」。**支持一次多选多部**：勾选结果落到下面「待关联」暂存表（虚线框），逐条可改文案/排序、可单独移除，最后一次 `POST` 批量提交（服务端一次事务、成对落库）。搜索处理器必须绑 `@search`（naive 的 NSelect 只有 `onSearch` prop，**没有** `update:search-value` 事件；绑错不报错也不发请求，下拉永远"无数据"）；挂载时预取前 20 条候选，输入防抖 260ms。
+   - 列表：NDataTable 行内可改**关系 / 文案 / 排序**（保存即 `POST /movies/{id}/links`；同一对已存在 = 更新），「解除」走 NPopconfirm，文案量化影响（"解除与「X」的关联（对方那一侧同时解除）"）。
+   - 半截数据要显形：`vo.oneWay === true`（库里只有**对方**那一侧落了这条关联）→ 对方影片列加 warning tag「仅单向记录 · 保存后自动补齐双向」，该行的「保存」按钮文案改成「补齐双向」（提交一次即把本侧缺的行补上，之后 `oneWay` 消失）；「解除」照常可用（后端 `DELETE` 两侧任一行都认）。
+   - 状态列必须显灰：`DRAFT`/`OFF` 或 0 集的关联 → tag 写"App 端不显示"（可见性铁律在 App 侧生效，后台这边要看得见才能纠正）。
+   - 提示文案必须讲清**双向**：在这里加一条，对方影片页面会自动出现本片；管理员只需在一侧操作一次。另须说明：观众端卡片只印那一季自己的片名，**不再额外印「第 X 季」文案**（本页/对方页两栏可留空，文案留给以后 TV / 手机端）；区块标题取「关系」——全是「同剧其他季」时显示「其他季」，否则显示「关联影片」。
+4. **底部操作栏**（sticky）：左 = 未保存标记（本地脏检查），右 = `保存并发布`（新建 POST / 编辑 PUT 主信息 → 若剧集有改动再 PUT videos）/ 取消。
 
 脏检查：`beforeunload` + 路由离开守卫（NDialog"有未保存修改"）。
 
@@ -283,7 +289,17 @@ RUNNING 行存在时，列表整页 3s 轻轮询。
 - 点"预览解析"：本地拆行 → 展示 `将新增 N 集（接到第 42 集起）/ 覆盖 M 集 / 跳过 K 行(原因)` 三行统计 + 前 5 行示例表。
 - "确认导入" → POST import → 结果 toast `新增 N · 覆盖 M` + 若有 errors 弹 NDialog 行级明细；成功刷表。
 
-### 6.6 通用
+### 6.6 `MovieLinksPanel`（「其他季」关联，2026-11-17）
+
+- 挂在影片编辑页「关联数据」区块内，`props: { movieId, movieTitle }`，自己管加载/提交/删除（`api/movieLink.ts`，契约 §4.13）。
+- 行数据带一份原始快照（`orig`：label / reverseLabel / sortNo / relationType 四项）：「保存」按钮只在脏行可点，避免每点一下就打一次请求。
+- 添加走**多选 + 暂存表**：`NSelect multiple` 挑若干部 → `pending` 列表（片名/元信息 + 本页文案 + 对方页文案 + 排序 + 移除）→ 一次 `movieLinkApi.add(movieId, items[])` 批量提交；已关联过的候选直接禁选（`markLinked()` 在每次 load / 搜索后刷 `disabled`），候选元信息单独存 `pickedMeta`（搜索结果是会被覆盖的，选中的那批要一直显示得出片名）。上限镜像服务端的 50 条（超出就禁用提交并说明），新行的 `sortNo` 留空由服务端接在当前最大值后 +10。
+- 关联在服务端永远成对落两条（双向对称），所以每行同时给「本页文案」与「对方页文案」两个输入框，保存一次把两头都写对；只有对方那一侧落了行的记录（`oneWay`）也会列出来并标 warning tag，「保存」按钮在该行显示成「补齐双向」。
+- 封面列走 `imgUrl()` 本站图片代理（豆瓣图床直连 403）；状态列非 PUBLISHED 一律 warning tag + "App 端不显示"。
+- 排序语义：留空 = 对方影片自己的季号（列表 vo 带 `seasonNo`，对方影片列直接写成「第 N 季 · 年份 · 集数」）。行内 `sortNo` 与季号不一致时，排序列旁出现「季号 N」小按钮一键填对（仍需点「保存」才落库）。表头右侧「按季号重排全部」走 NPopconfirm → `POST /movies/{id}/links/resort`，把两侧所有「同剧其他季」一次归位。
+- 空态：`NEmpty` "还没有关联的其他季"。
+
+### 6.7 通用
 - `EmptyState`：插画位（内联 SVG）+ 文案 + 主按钮（各空列表复用）。
 - `TimeText`：相对时间（<1min 实时、<7d 相对、否则 `yyyy-MM-dd HH:mm`），悬停绝对时间 tooltip。
 - `CopyableText`：truncate + 复制图标（直链/路径/密码）。

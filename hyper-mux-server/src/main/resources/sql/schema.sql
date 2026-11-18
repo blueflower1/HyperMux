@@ -177,3 +177,25 @@ CREATE INDEX IF NOT EXISTS idx_cast_target_status ON cast_request (target_device
 CREATE INDEX IF NOT EXISTS idx_cast_user_time ON cast_request (user_id, create_time DESC);
 -- cancelledIds 下发窗口：只下发"被终态化且尚未通知过目标设备"的请求
 CREATE INDEX IF NOT EXISTS idx_cast_notify ON cast_request (target_device_id, notified_at);
+
+-- ============ 影片关联（手动维护：其他季 / 衍生 / 前传 · 2026-11-17） ============
+-- 语义：**双向对称** —— 服务层写入时总是成对落两条（A→B 与 B→A），删除也成对删；
+-- 于是任意一侧的查询都只需 `movie_id = ?`（走 uk_movie_link 前缀索引），不必 OR 两列。
+-- 读取侧另有一层兜底 `rowsIncomingOnly`：只有对方那一侧落了行的半截数据也会在本侧列出来（后台标 oneWay，保存即补齐成对）。
+-- sort_no 默认 = 对方那一部是第几季（该影片剧集的 MIN(season_no)，第一季→1、第九季→9）；后台「按季号重排」两侧一起归位。
+-- 只有 web 观看端与 Windows 桌面壳消费（§3.4 relatedMovies）；mobile/tv 忽略该字段。
+-- relation_type = season / spinoff / custom（只影响后台分组展示，不做强校验）；
+-- label = 卡片上的文案（如「第二季」），留空 = 客户端直接用目标片名。
+CREATE TABLE IF NOT EXISTS movie_link (
+  id bigserial PRIMARY KEY,
+  movie_id int8 NOT NULL REFERENCES movie(id) ON DELETE CASCADE,
+  related_movie_id int8 NOT NULL REFERENCES movie(id) ON DELETE CASCADE,
+  relation_type varchar(16) NOT NULL DEFAULT 'season',
+  label varchar(64),
+  sort_no int4 NOT NULL DEFAULT 0,
+  create_time timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_movie_link UNIQUE (movie_id, related_movie_id),
+  CONSTRAINT ck_movie_link_not_self CHECK (movie_id <> related_movie_id)
+);
+-- 删除某部影片时要把"别人指向它"的那些反向行也收掉，没这个索引就得全表扫
+CREATE INDEX IF NOT EXISTS idx_movie_link_related ON movie_link (related_movie_id);

@@ -12,6 +12,8 @@ import com.hypermux.server.common.PageResult;
 import com.hypermux.server.common.PinyinUtils;
 import com.hypermux.server.common.Ts;
 import com.hypermux.server.movie.MovieEntity;
+import com.hypermux.server.movie.MovieLinkEntity;
+import com.hypermux.server.movie.MovieLinkMapper;
 import com.hypermux.server.movie.MovieMapper;
 import com.hypermux.server.movie.MovieTagEntity;
 import com.hypermux.server.movie.MovieTagMapper;
@@ -43,17 +45,19 @@ public class MovieAdminService {
     private final MovieMapper movieMapper;
     private final VideoMapper videoMapper;
     private final MovieTagMapper movieTagMapper;
+    private final MovieLinkMapper movieLinkMapper;
     private final CategoryMapper categoryMapper;
     private final SourceMapper sourceMapper;
     private final PlayProgressMapper progressMapper;
     private final CategoryAdminService categoryAdminService;
 
     public MovieAdminService(MovieMapper movieMapper, VideoMapper videoMapper, MovieTagMapper movieTagMapper,
-                             CategoryMapper categoryMapper, SourceMapper sourceMapper,
+                             MovieLinkMapper movieLinkMapper, CategoryMapper categoryMapper, SourceMapper sourceMapper,
                              PlayProgressMapper progressMapper, CategoryAdminService categoryAdminService) {
         this.movieMapper = movieMapper;
         this.videoMapper = videoMapper;
         this.movieTagMapper = movieTagMapper;
+        this.movieLinkMapper = movieLinkMapper;
         this.categoryMapper = categoryMapper;
         this.sourceMapper = sourceMapper;
         this.progressMapper = progressMapper;
@@ -385,9 +389,16 @@ public class MovieAdminService {
                 .eq(PlayProgressEntity::getMovieId, id));
         videoMapper.delete(new LambdaQueryWrapper<VideoEntity>().eq(VideoEntity::getMovieId, id));
         movieTagMapper.delete(new LambdaQueryWrapper<MovieTagEntity>().eq(MovieTagEntity::getMovieId, id));
+        // 关联不成对删的话，别的影片页面上会留下指向已删影片的关联（App 侧被可见性铁律挡掉，但后台列表里是脏数据）
+        long links = movieLinkMapper.selectCount(new LambdaQueryWrapper<MovieLinkEntity>()
+                .eq(MovieLinkEntity::getMovieId, id)
+                .or().eq(MovieLinkEntity::getRelatedMovieId, id));
+        movieLinkMapper.delete(new LambdaQueryWrapper<MovieLinkEntity>()
+                .eq(MovieLinkEntity::getMovieId, id)
+                .or().eq(MovieLinkEntity::getRelatedMovieId, id));
         progressMapper.delete(new LambdaQueryWrapper<PlayProgressEntity>().eq(PlayProgressEntity::getMovieId, id));
         movieMapper.deleteById(id);
-        return new AdminVos.DeleteMovieResultVo(id, (int) episodes, (int) progress);
+        return new AdminVos.DeleteMovieResultVo(id, (int) episodes, (int) progress, (int) links);
     }
 
     // ==================== 剧集 ====================

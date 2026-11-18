@@ -92,6 +92,25 @@ export interface MovieDetail {
   episodeTotal: number
   category: CategoryRef
   progress: ProgressFull | null
+  /**
+   * 关联影片（「其他季 / 衍生 / 前传」，后台手动建立，契约 §3.4 + §4.13）。
+   * 服务端已按 sort_no 排好、并按可见性铁律滤过（未上架或 0 集的不会出现）；
+   * 只有 web 观看端与 Windows 桌面壳消费，mobile / tv 的模型里没有这个字段。
+   */
+  relatedMovies?: RelatedMovie[] | null
+}
+
+/** 一条关联：movie 就是库里另一条影片（各季在库里本来就是各自独立的 movie 记录） */
+export interface RelatedMovie {
+  /**
+   * 后台填的文案（如「第二季」）。当前观看端卡面只印片名、不再额外显示这栏文案（卡片上本来就是那一季的
+   * 片名，再叠一行是重复信息），字段留着给以后 TV / 手机端用。
+   */
+  label: string | null
+  /** season / spinoff / custom：全是 season 时区块标题显示「其他季」，否则显示「关联影片」 */
+  relationType: string
+  sortNo: number
+  movie: MovieCard
 }
 
 export interface CategoryRef {

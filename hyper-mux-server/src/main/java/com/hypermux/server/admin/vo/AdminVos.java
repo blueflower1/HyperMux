@@ -119,7 +119,7 @@ public final class AdminVos {
     public record ResetPasswordResultVo(Long userId, String username, String newPassword) {
     }
 
-    public record DeleteMovieResultVo(Long id, int deletedEpisodes, int deletedProgress) {
+    public record DeleteMovieResultVo(Long id, int deletedEpisodes, int deletedProgress, int deletedLinks) {
     }
 
     public record DeleteUserResultVo(Long id, int deletedProgress) {
@@ -155,6 +155,37 @@ public final class AdminVos {
                                 String backdropUrl, Double rating, String area, String language, String intro,
                                 Integer sortNo, Long sourceId, String sourcePath, List<Long> tagIds,
                                 List<EpisodeBody> episodes) {
+    }
+
+    // ==================== 影片关联（契约 §4.13） ====================
+
+    /**
+     * 一条关联（单向行；写入侧成对落两条，所以列表里看到的都是"本片 → 对方"）。
+     * title/coverUrl/year/status/episodeTotal 都取自**对方**影片，status 用于后台显灰：
+     * 未上架（非 PUBLISHED）或 0 集的关联，App 端不会出现（可见性铁律），但后台要看得见才能纠正。
+     */
+    public record MovieLinkVo(Long linkId, Long movieId, Long relatedMovieId, String title, String coverUrl,
+                              Integer year, String status, Integer episodeTotal,
+                              /** 对方影片自己代表第几季（video.season_no 最小值）：关联排序默认就按它落 */
+                              Integer seasonNo,
+                              String relationType, String label,
+                              String reverseLabel, Integer sortNo, long createTime, boolean oneWay) {
+    }
+
+    /**
+     * 添加/改一条关联的入参。
+     * label = 本片页面上给对方看的文案（如「第二季」）；reverseLabel = 对方页面上给本片看的文案（如「第一季」）；
+     * 留空(null) = 不改动已有值 / 新条目则为空，App 端直接用对方片名。
+     */
+    public record MovieLinkItemReq(Long relatedMovieId, String label, String reverseLabel, Integer sortNo,
+                                   String relationType) {
+    }
+
+    public record MovieLinkAddReq(List<MovieLinkItemReq> items) {
+    }
+
+    /** added/updated/deleted = 本次影响到的**对**数（一对算一条，不是两条行）；total = 操作后本片的关联条数 */
+    public record MovieLinkOpResultVo(int added, int updated, int deleted, int total) {
     }
 
     public record VideoReplaceReq(List<EpisodeBody> episodes) {

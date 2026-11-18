@@ -10,6 +10,8 @@ import com.hypermux.server.common.ErrorCode;
 import com.hypermux.server.common.PageResult;
 import com.hypermux.server.common.Ts;
 import com.hypermux.server.movie.MovieEntity;
+import com.hypermux.server.movie.MovieLinkEntity;
+import com.hypermux.server.movie.MovieLinkMapper;
 import com.hypermux.server.movie.MovieMapper;
 import com.hypermux.server.movie.MovieTagMapper;
 import com.hypermux.server.progress.PlayProgressMapper;
@@ -30,18 +32,22 @@ public class MovieQueryService {
 
     private static final int MAX_SIZE = 100;
     private static final int MAX_TAGS = 5;
+    /** 关联影片上限：够放一部长剧的全部季，又不会把播放页的选集区顶出屏幕 */
+    private static final int MAX_RELATED = 20;
 
     private final MovieMapper movieMapper;
     private final MovieTagMapper movieTagMapper;
+    private final MovieLinkMapper movieLinkMapper;
     private final PlayProgressMapper progressMapper;
     private final CategoryMapper categoryMapper;
     private final VideoMapper videoMapper;
 
     public MovieQueryService(MovieMapper movieMapper, MovieTagMapper movieTagMapper,
-                             PlayProgressMapper progressMapper, CategoryMapper categoryMapper,
-                             VideoMapper videoMapper) {
+                             MovieLinkMapper movieLinkMapper, PlayProgressMapper progressMapper,
+                             CategoryMapper categoryMapper, VideoMapper videoMapper) {
         this.movieMapper = movieMapper;
         this.movieTagMapper = movieTagMapper;
+        this.movieLinkMapper = movieLinkMapper;
         this.progressMapper = progressMapper;
         this.categoryMapper = categoryMapper;
         this.videoMapper = videoMapper;
@@ -166,7 +172,62 @@ public class MovieQueryService {
         return new TvVos.MovieDetailVo(
                 m.getId(), m.getTitle(), m.getOriginalTitle(), m.getYear(), m.getCoverUrl(), m.getBackdropUrl(),
                 toDouble(m.getRating()), m.getArea(), m.getLanguage(), m.getIntro(), tags,
-                m.getEpisodeTotal() == null ? 0 : m.getEpisodeTotal(), category, latestProgress(userId, movieId));
+                m.getEpisodeTotal() == null ? 0 : m.getEpisodeTotal(), category, latestProgress(userId, movieId),
+                relatedMovies(movieId, userId));
+    }
+
+    /**
+     * 关联影片（契约 §3.4 的 relatedMovies，来源见 §4.13）：后台手动建立的「其他季 / 衍生 / 前传」。
+     *
+     * 两条口径必须与列表页完全一致，否则会出现"详情页里点得进去、列表里搜不到"的错位：
+     * ① 可见性走同一条铁律 {@link #visibleWrapper()}；② 卡片走同一个 {@link #assembleCards}（带标签与断点，批量不 N+1）。
+     * 展示顺序认后台填的 sort_no（mapper 已按它排好），不可见的目标跳过、不留空位。
+     *
+     * 消费方只有 web 观看端与 Windows 桌面壳；mobile / tv 模型里没有这个字段，Gson 忽略。
+     */
+    public List<TvVos.RelatedMovieVo> relatedMovies(Long movieId, Long userId) {
+        List<MovieLinkMapper.MovieLinkRow> rows = new ArrayList<>(movieLinkMapper.rowsOfMovie(movieId));
+        // 「只有对方那一侧落了行」的也带上：两侧必须对称可见，否则"这一季看不到那一季"根本没法解释
+        List<MovieLinkMapper.MovieLinkRow> incoming = movieLinkMapper.rowsIncomingOnly(movieId);
+        if (!incoming.isEmpty()) {
+            rows.addAll(incoming);
+            rows.sort(Comparator.comparingInt((MovieLinkMapper.MovieLinkRow r) -> nz(r.getSortNo()))
+                    .thenComparingLong(r -> nzL(r.getLinkId())));
+        }
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        List<Long> targets = new ArrayList<>();
+        for (MovieLinkMapper.MovieLinkRow row : rows) {
+            targets.add(row.getTargetId());
+        }
+        Map<Long, MovieEntity> visible = new HashMap<>();
+        for (MovieEntity mo : movieMapper.selectList(visibleWrapper().in(MovieEntity::getId, targets))) {
+            visible.put(mo.getId(), mo);
+        }
+        List<MovieEntity> ordered = new ArrayList<>();
+        Map<Long, MovieLinkMapper.MovieLinkRow> linkByTarget = new HashMap<>();
+        for (MovieLinkMapper.MovieLinkRow row : rows) {
+            MovieEntity mo = visible.get(row.getTargetId());
+            if (mo == null || ordered.size() >= MAX_RELATED) {
+                continue;
+            }
+            ordered.add(mo);
+            linkByTarget.put(mo.getId(), row);
+        }
+        List<TvVos.RelatedMovieVo> out = new ArrayList<>();
+        for (TvVos.MovieCardVo card : assembleCards(ordered, userId)) {
+            MovieLinkMapper.MovieLinkRow row = linkByTarget.get(card.id());
+            if (row == null) {
+                continue;
+            }
+            String type = row.getRelationType() == null || row.getRelationType().isBlank()
+                    ? MovieLinkEntity.TYPE_SEASON : row.getRelationType().trim();
+            // 本侧缺行时不要拿对方那条文案来贴本侧的卡（"第九季"贴到第一季页面上就是错的）：留空，客户端用片名
+            String label = row.isIncomingOnly() ? null : row.getLabel();
+            out.add(new TvVos.RelatedMovieVo(label, type, nz(row.getSortNo()), card));
+        }
+        return out;
     }
 
     private TvVos.ProgressFullVo latestProgress(Long userId, Long movieId) {

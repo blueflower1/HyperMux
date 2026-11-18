@@ -27,6 +27,8 @@
   --topbar-h: 56px;
   --titlebar-h: 0px;
   --tabbar-h: calc(58px + env(safe-area-inset-bottom));
+  /* 内容列宽度上限：大屏跟随视口放宽（见下方断点），浏览器窗口窄时仍按 1440 收拢 */
+  --app-max: 1440px;
   --r-lg: 18px;
   --r: 14px;
   --r-sm: 10px;
@@ -143,12 +145,29 @@ img {
 }
 
 /* ---------- 布局壳 ---------- */
+/* 外壳本身不再限宽：标题栏/顶栏按窗口整宽（大屏全屏时左右不留空白带），
+   内容列由 .shell / .topbar-inner 用 --app-max 收拢并居中 */
 .app {
-  max-width: 1440px;
-  margin: 0 auto;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* 大屏（笔记本外接 2K/4K、电视、超宽屏）跟随视口放宽，避免左右大片空白 */
+@media (min-width: 1560px) {
+  :root {
+    --app-max: none;
+  }
+}
+@media (min-width: 2400px) {
+  :root {
+    --app-max: 2440px;
+  }
+}
+@media (min-width: 3000px) {
+  :root {
+    --app-max: 2820px;
+  }
 }
 
 /* ---------- 桌面壳自绘标题栏（无边框窗口，仅 Tauri） ---------- */
@@ -212,6 +231,74 @@ img {
   color: #fff;
 }
 
+/* 标题栏退出登录入口（与「我的」页共用同一套二次确认面板） */
+.tb-logout-wrap {
+  position: relative;
+  margin-left: 2px;
+}
+.tb-logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tb-logout:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.tb-logout-wrap .confirm-pop {
+  top: calc(100% + 8px);
+  left: 0;
+  width: 268px;
+}
+
+/* ---------- 退出登录二次确认面板 ---------- */
+.confirm-pop {
+  position: absolute;
+  z-index: 95;
+  padding: 12px 14px;
+}
+.confirm-pop-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.confirm-pop-text {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.confirm-pop-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--danger);
+  background: var(--danger-soft);
+  transition: filter 0.15s ease;
+}
+.confirm-danger:hover {
+  filter: brightness(0.96);
+}
+
 /* 登录路由：内容区去内边距，登录页正好铺满剩余视口（否则 content 的 20/40 padding 会撑出滚动条） */
 .app.login-route .content {
   padding: 0;
@@ -225,6 +312,9 @@ img {
 .shell {
   display: flex;
   flex: 1;
+  width: 100%;
+  max-width: var(--app-max);
+  margin: 0 auto;
   align-items: flex-start;
   gap: 20px;
 }
@@ -248,7 +338,7 @@ img {
 }
 
 .topbar-inner {
-  max-width: 1440px;
+  max-width: var(--app-max);
   margin: 0 auto;
   height: 100%;
   padding: 0 24px;
@@ -438,6 +528,31 @@ img {
 .dropdown-item.danger:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* 下拉里的退出二次确认（点「退出登录」只提问，必须再点「确认退出」） */
+.dropdown-confirm {
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+}
+.dropdown-confirm-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.dropdown-confirm-actions {
+  margin-top: 9px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dropdown-confirm-actions .btn,
+.dropdown-confirm-actions .confirm-danger {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .fade-enter-active,
@@ -1680,10 +1795,26 @@ img {
   opacity: 0.72;
 }
 
+/* 播放页整宽跟随 --play-max：大屏（含电视/4K 全屏窗口）不再被 1000px 卡成一小块 */
 .play-page {
-  max-width: 1000px;
+  max-width: var(--play-max, 1000px);
   margin: 0 auto;
-  padding-bottom: 60px;
+  padding-bottom: 56px;
+}
+@media (min-width: 1560px) {
+  .play-page {
+    --play-max: 1320px;
+  }
+}
+@media (min-width: 1900px) {
+  .play-page {
+    --play-max: 1520px;
+  }
+}
+@media (min-width: 2400px) {
+  .play-page {
+    --play-max: 1720px;
+  }
 }
 
 .play-topbar {
@@ -1692,29 +1823,75 @@ img {
   z-index: 40;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 52px;
+  gap: 12px;
+  min-height: 60px;
   margin: 0 -24px 14px;
   padding: 0 24px;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 返回 / 影片详情：带文字的胶囊按钮，比纯图标更容易看懂能干什么 */
+.play-back,
+.play-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  transition: all 0.15s ease;
+  flex: none;
+}
+.play-detail {
+  padding: 0 13px;
+}
+.play-back:hover,
+.play-detail:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: var(--surface-2);
 }
 
 .play-title {
   flex: 1;
   min-width: 0;
-  font-size: 14.5px;
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.play-name {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.play-title .ep-tag {
-  font-weight: 500;
+.play-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12.5px;
   color: var(--text-3);
-  margin-left: 8px;
-  font-size: 13px;
+}
+.play-meta span + span::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+.play-meta .meta-done {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .player-box {
@@ -1722,8 +1899,11 @@ img {
   border-radius: var(--r-lg);
   overflow: hidden;
   background: #0b0c10;
+  border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
   aspect-ratio: 16 / 9;
+  /* 窗口不高时不逼着页面滚动：16:9 让位给可视高度（黑底，letterbox 看不出来） */
+  max-height: calc(100vh - var(--titlebar-h) - 190px);
 }
 
 /* artplayer 专用宿主：独立于 Vue 管理的 overlay 节点 */
@@ -1786,14 +1966,140 @@ img {
   flex-wrap: wrap;
   align-items: center;
 }
+/* 已看完：状态化 + 禁用，避免重复标记 */
+.btn.is-done {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  opacity: 1;
+  cursor: default;
+}
+
+/* 右侧提示区：自动连播状态 + 桌面端快捷键 */
+.play-tips {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.play-autonext {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.play-autonext::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0.75;
+}
+.play-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.play-keys kbd {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  margin-right: 2px;
+}
 
 .play-eps {
   margin-top: 6px;
 }
 .play-eps .ep-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   font-size: 15px;
   font-weight: 800;
-  margin: 0 0 10px;
+  margin: 0 0 12px;
+}
+.play-eps .ep-total {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.ep-season + .ep-season {
+  margin-top: 14px;
+}
+.ep-season-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ep-season-name {
+  font-weight: 700;
+}
+.ep-season-count {
+  font-size: 12px;
+  color: var(--text-3);
+}
+/* 播放页的剧集格子更宽：一屏能看清「第 N 集」而不是挤成缩写 */
+.play-eps .ep-grid {
+  max-width: none;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+.play-eps .ep-btn {
+  height: 46px;
+}
+.ep-seen {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  color: var(--primary);
+}
+
+/* ---------- 关联影片（「其他季」）：详情页卡片区与播放页选集区下方各摆一处 ---------- */
+.related {
+  margin-top: 16px;
+  /* .card 本身不带内边距（详情页各栏的 padding 由 .hero / .episodes 这类区块类各自给），
+     这里漏了就会整栏贴着卡片边框、比上面「选集」往左凸一截，标题竖条和封面都对不齐。
+     底边只留 8px：rail 自带 10px 下内边距，合起来正好与 .episodes 的 18px 齐平。 */
+  padding: 16px 18px 8px;
+}
+/* 播放页里它跟在选集网格后面，间距比详情页大一档，免得跟选集粘成一块 */
+.play-related {
+  margin-top: 24px;
+}
+.play-related .ep-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0 0 12px;
+}
+.play-related .ep-total {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+@media (max-width: 700px) {
+  .play-tips {
+    display: none;
+  }
+  .play-eps .ep-grid {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  }
 }
 
 /* ---------- 历史 ---------- */
@@ -2083,6 +2389,12 @@ img {
 }
 
 /* ---------- 我的 ---------- */
+/* 窄屏铺满，宽屏居中收拢：大屏全屏时不会在内容列左侧堆出一整片空白 */
+.me-wrap {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
 .me-card {
   display: flex;
   align-items: center;
@@ -2161,9 +2473,18 @@ img {
   box-shadow: var(--shadow);
 }
 
+.me-logout-wrap {
+  position: relative;
+  margin-top: 16px;
+}
+.me-logout-wrap .confirm-pop {
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+}
+
 .me-logout {
   width: 100%;
-  margin-top: 16px;
   height: 44px;
   border-radius: var(--r-sm);
   font-size: 14px;

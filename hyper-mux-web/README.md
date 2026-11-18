@@ -64,6 +64,7 @@ set HYPERMUX_PUBLIC_SERVER_URL=http://<host>:<port> && npm run build
 - 分类列表 / 影片详情 / 剧集网格（播放进度条、已看标记）
 - 播放页：artplayer、断点续播（>30s 自动定位并 toast 提示）、10s 定时上报 + 暂停/退出/切后台 keepalive 兜底上报、看完自动标记并连播下一集、倍速 / 画中画 / 横竖屏自动转屏
 - 历史记录
+- 关联影片（「其他季 / 衍生」）：详情页与播放页各一条横向卡片栏（`RailScroller` + `MovieCard`），数据来自详情接口的 `relatedMovies`（后台在影片编辑页手动建立，双向对称，服务端按可见性铁律过滤并排序）。卡面只印那一季自己的片名，不再额外叠一行「第 X 季」文案（后台的 label 留给以后 TV / 手机端）。点卡片进那一部自己的详情页，**不参与**「上一集/下一集」与自动连播。仅 web 观看端与 Windows 桌面壳消费，mobile / tv 忽略该字段。
 - 明暗主题切换（默认跟随系统）
 
 ## 接口约定（与 tv 端共享，详见 ../docs/plans/30-api-contract.md）

@@ -51,6 +51,40 @@ export interface MovieListVo {
   updateTime: number
 }
 
+/** 影片关联（「其他季」）：一条 = 本片指向对方那条行；title/coverUrl/… 全部取自**对方**影片 */
+export interface MovieLinkVo {
+  linkId: number
+  movieId: number
+  relatedMovieId: number
+  title: string
+  coverUrl: string | null
+  year: number | null
+  /** 对方影片的上架状态：非 PUBLISHED 或 0 集时 App 端不会出现（可见性铁律），后台显灰提示 */
+  status: MovieStatus
+  episodeTotal: number
+  /** 对方影片自己代表第几季（取它剧集的 season_no 最小值）：关联排序留空时服务端就按这个数落 */
+  seasonNo: number | null
+  relationType: string
+  /** 本页面上给对方看的文案（如「第二季」）；空 = 客户端直接用对方片名 */
+  label: string | null
+  /** 对方页面上给本片看的文案（如「第一季」） */
+  reverseLabel: string | null
+  sortNo: number
+  createTime: number
+  /**
+   * true = 库里只有**对方**那一侧落了这条关联（本侧缺行）。
+   * 服务端写入本该成对，这条标志用来把半截数据显出来：在本侧保存一次即自动补齐成对，删除也照常生效。
+   */
+  oneWay: boolean
+}
+
+export interface MovieLinkOpResultVo {
+  added: number
+  updated: number
+  deleted: number
+  total: number
+}
+
 export interface MovieDetailVo {
   id: number
   title: string

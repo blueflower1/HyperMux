@@ -249,6 +249,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_cast_pending_user ON cast_request (user_id)
 CREATE INDEX IF NOT EXISTS idx_cast_target_status ON cast_request (target_device_id, status, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_cast_user_time     ON cast_request (user_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_cast_notify        ON cast_request (target_device_id, notified_at);
+
+-- ============ 影片关联（「其他季 / 衍生 / 前传」，2026-11-17） ============
+CREATE TABLE IF NOT EXISTS movie_link (
+  id               bigserial PRIMARY KEY,
+  movie_id         int8 NOT NULL REFERENCES movie(id) ON DELETE CASCADE,
+  related_movie_id int8 NOT NULL REFERENCES movie(id) ON DELETE CASCADE,
+  relation_type    varchar(16) NOT NULL DEFAULT 'season',  -- season / spinoff / custom
+  label            varchar(64),                            -- 本页给对方看的文案（如「第二季」）；空 = 用对方片名
+  sort_no          int4 NOT NULL DEFAULT 0,
+  create_time      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_movie_link UNIQUE (movie_id, related_movie_id),
+  CONSTRAINT ck_movie_link_not_self CHECK (movie_id <> related_movie_id)
+);
+-- 删影片时要收掉"别人指向它"的反向行，没这个索引就得全表扫
+CREATE INDEX IF NOT EXISTS idx_movie_link_related ON movie_link (related_movie_id);
 ```
 
 > `openlist_source` 必须先于 `movie` 存在（`movie.source_id` 引用它）。PostgreSQL 允许引用后创建的表（建表时 FK 只做存在性登记，引用目标不存在会报错）——**故 schema.sql 中 `openlist_source` 段落要放在 `movie` 之前执行**，上面 DDL 顺序即执行顺序（`movie.source_id` 那段注释后已调整：实际写入文件时把 `openlist_source` 表放在 `movie` 之前）。
@@ -342,6 +357,7 @@ ON CONFLICT (name) DO NOTHING;
 6. **无 Redis**：单进程 + Caffeine 足够（见 20-backend §9）；断点 upsert 靠唯一约束无锁。
 7. **时间戳**：库内 `timestamptz`；API 层统一毫秒 `long`（TV 端直接用，不做时区换算）。
 8. **投屏请求落库、设备在线不落库**（v1.3）：`cast_request` 必须落库——它既是 TV/手机两端的唯一状态源，也是"单并发"这条业务铁律的强制点（部分唯一索引比应用层锁可靠），同时给管理后台留审计痕迹。设备"在线"是**秒级易变状态**，落库会让每 2s 一次的 poll 变成写放大，因此只存内存 Caffeine（TTL 30s），`user_device.last_seen` 落库节流 30s 仅供展示。过期判定一律按落库的 `expire_time` 列，不能按"缓存被轮询续期"（扫码登录已踩过这个坑）。
+9. **`movie_link` 双向对称落两条行**（2026-11-17）：季在库里不是 movie 的字段（只有 `video.season_no`），"金装律师 第一季 / 第二季"各自是一条 movie 记录，所以关联只能建在影片与影片之间。存成单向一行的话，"第一季页面看得到第二季、第二季页面看不到第一季"这种半截状态一定会出现（管理员得记着去两边各加一遍）；服务层成对写、成对删，换来任意一侧的读取只需 `movie_id = ?`（走 `uk_movie_link` 前缀索引）；读取侧再加一层兜底 `rowsIncomingOnly`（按 `related_movie_id = ?` 走 `idx_movie_link_related`，并用 `NOT EXISTS` 只挑"本侧缺行"的那种），把半截数据在两侧都显出来，本侧保存一次即自动补齐成对。`CHECK (movie_id <> related_movie_id)` 在库里挡自关联，上限 50 条与文案 64 字这类软校验在服务层。新条目的 `sort_no` 默认 = 对方那一部是第几季（取该影片剧集的 `MIN(season_no)`，第一季→1、第九季→9；反向那一行按本片季号，因为各自的排序归各自那一页管），季号取不到（没有剧集）才退回「接在当前最大值 +10」。关联只记关系，不复制任何影片数据：App 读到的卡片仍走 §3.3 的同一套卡片装配与可见性铁律。
 
 ---
 
@@ -350,3 +366,4 @@ ON CONFLICT (name) DO NOTHING;
 - 本期：`schema.sql` + `seed.sql` 手动执行（`psql -h ... -f`），`schema_version.sql` 注释头标注版本 `v1`。
 - M5 可选引入 Flyway（基线即 schema.sql），新增变更走 `V2__xxx.sql`。
 - 任何后续表结构变更必须先改本文档 + schema.sql，再改代码（防文档与库漂移）。
+- 现状（2026-11-17）：`schema.sql` 已由服务端启动时的 `SchemaMigrateRunner` 幂等执行（`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`），新增表按段落追加即可，不需要手工 psql。本次 `movie_link` 就是这么加的。

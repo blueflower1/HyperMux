@@ -138,11 +138,24 @@ Query：`page`、`size`、`keyword?`（片名/原名模糊，ILIKE）。
   "tags": [ { "id": 1, "name": "电视剧", "type": 0 }, { "id": 11, "name": "中国", "type": 1 } ],
   "episodeTotal": 39,
   "pool": { "id": 1, "name": "家庭影院" },
-  "progress": { "videoId": 301, "seasonNo": 1, "episodeNo": 5, "positionMs": 5240000, "durationMs": 28800000, "finished": 0 }
+  "progress": { "videoId": 301, "seasonNo": 1, "episodeNo": 5, "positionMs": 5240000, "durationMs": 28800000, "finished": 0 },
+  "relatedMovies": [
+    { "label": "第二季", "relationType": "season", "sortNo": 10, "movie": { "id": 13, "title": "狂飙 第二季", "coverUrl": "https://...", "backdropUrl": null, "rating": 9.1, "year": 2024, "area": "中国", "episodeTotal": 30, "tags": ["电视剧"], "progress": { "videoId": 402, "seasonNo": 1, "episodeNo": 3, "positionMs": 1200000, "durationMs": 27000000 }, "updateTime": 1760000000000 } }
+  ]
 }
 ```
 
 错误：404（不存在或不可见：DRAFT/OFF/池停用）。
+
+**`relatedMovies`（2026-11-17 新增，关联影片 /「其他季」）**
+
+- 来源：后台手动建立，见 §4.13。**库里每一季各自是一条 movie 记录**（季只挂在 `video.season_no` 上，movie 没有季字段），所以关联只能建在影片与影片之间。
+- 服务端已按 `sortNo` 升序排好、并按 §3.3 的可见性铁律过滤（未上架 / 0 集 / 池停用的目标不会出现），上限 20 条；`label` 为后台填的文案（可空 = 客户端直接用 `movie.title`），`relationType` ∈ `season|spinoff|custom`。
+- **读取是双向兜底的**：正常写入本该成对，但只要出现"只有对方那一侧落了行"的半截数据（手工改库 / 历史数据），本侧一样会把这条关联列出来，观众从哪一季进来都看得见。这种行没有本侧文案，`label` 直接给 `null`（不能把对方的文案贴到本片卡上），客户端用片名。
+- **卡面不再印 `label`**：卡片本来就写着那一季的片名，再叠一行「第 X 季」是重复信息，所以 web / Windows 只渲染卡片本身；`label` 字段保留给以后 TV / 手机端用。区块标题由 `relationType` 决定：这一片的关联全是 `season` 时显示「其他季」，否则显示「关联影片」。
+- 卡片对象就是 §3.3 的 `MovieCardVo`（带 `progress`，所以"那一季我看到第几集"直接可显示），服务端与列表页共用同一套装配，不额外开接口。
+- **消费方只有 web 观看端与 Windows 桌面壳**（详情页与播放页各摆一处「其他季」卡）。mobile / tv 的模型里没有这个字段：Gson 忽略未知字段，旧客户端行为不变；本期不下放，`§45/§40` 客户端文档不提这个区块。
+- 关联只是**浏览**入口：不参与 `上一集/下一集`、不参与"本集播完自动接下一集"，也不改进断点/历史模型（`play_progress` 本来就是 `(user_id, video_id)` 唯一、带 `movie_id`，跨季各集进度天然分别记录）。
 
 ### 3.5 剧集列表 `GET /api/app/movie/{id}/videos`
 
@@ -254,6 +267,8 @@ Query：
 | platform | string | | 默认 `mobile`；白名单 `mobile`/`tv`/`windows`，其他值 400 |
 
 响应：**仅当**该平台最新 versionCode > `code` 时 `200 + R<UpdateCheckVo>`；无更新（未发布 / 已最新）→ **204 无 body**。
+
+> Windows 桌面壳上报 `code=0`（= 请直接把该平台最新发布给我），**是否提示更新由客户端按 `versionName` 与本机版本比较判定**。原因：`versionCode` 由管理后台手填、口径不可靠——现网 Windows 的 1.1.0 那条填的是 11000，而客户端按 `major*10000+minor*100+patch` 自身算出 10100，`11000 > 10100` 会让 1.1.0 客户端一直提示「可更新到 v1.1.0」（更新到自己）。mobile / tv 仍按自身 versionCode 上报，不受影响。
 
 `data`：
 
@@ -497,7 +512,7 @@ DRAFT→PUBLISHED（校验：poolId ✓、coverUrl ✓、非 missing 集 ≥1，
 PUBLISHED→OFF；幂等（OFF 重复 → 200）。
 
 #### `DELETE /api/admin/movies/{id}`
-级联删 video、断点、tag 绑定。响应 `data`: `{ "id": 12, "deletedEpisodes": 39, "deletedProgress": 3 }`（统计用）。
+级联删 video、断点、tag 绑定、§4.13 的影片关联（两侧一起清）。响应 `data`: `{ "id": 12, "deletedEpisodes": 39, "deletedProgress": 3, "deletedLinks": 2 }`（统计用）。
 
 ### 4.5 剧集
 
@@ -733,6 +748,49 @@ Query: page, size, keyword?, sourceId?, unparsed?
 - `castEnabled`：投屏总开关（落 `sys_config.cast_enabled` = `true`/`false`），**覆盖** `hypermux.cast.enabled` 默认值，改完即时生效不用重启；关闭后所有 `/api/app/cast/**` 返回 409 `投屏功能已关闭`。
 - `castConfirmSeconds`：接收端（TV / 网页端 / 电脑端 / 手机端）投屏确认弹窗倒计时秒数，取值 **3~15**，缺省 6；非法值 400。随 `cast/poll` 的 `confirmSeconds` 下发给接收端。
 - 响应 `data`：同 GET（回显最新全量）。
+
+### 4.13 影片关联（「其他季 / 衍生 / 前传」，2026-11-17）
+
+表：`movie_link`（DDL 见 [10-data-model §2](./10-data-model.md)）。**关联是双向对称的**：服务层每次写入成对落两条（A→B 与 B→A）、删除成对删，管理员只在一侧操作一次。读取侧另有一层兜底：本侧缺行、只有对方那一侧落了行的关联也会列出来（`oneWay: true`），在本侧保存一次即自动补齐成对——避免出现"第一季看得到第九季、第九季看不到第一季"这种没法解释也没法纠正的怪状态。
+
+#### `GET /api/admin/movies/{id}/links`
+
+响应 `data`（按 `sortNo` 升序，同 `sortNo` 按 `linkId`）：
+
+```json
+[
+  { "linkId": 7, "movieId": 12, "relatedMovieId": 13, "title": "狂飙 第二季", "coverUrl": "https://…",
+    "year": 2024, "status": "PUBLISHED", "episodeTotal": 30, "seasonNo": 2, "relationType": "season",
+    "label": "第二季", "reverseLabel": "第一季", "sortNo": 10, "createTime": 1763900000000, "oneWay": false }
+]
+```
+
+- `title/coverUrl/year/status/episodeTotal` 取自**对方**影片；`seasonNo` = 对方影片自己代表第几季（它剧集的 `MIN(season_no)`，没有剧集为 `null`）——也就是「排序留空」时服务端要落的那个默认值，后台直接显示出来方便核对。
+- 这里**不按可见性过滤**：未上架（`DRAFT`/`OFF`）或 0 集的关联后台要看得见才能纠正，App 侧由 §3.3 铁律自动挡掉（后台列表要显灰提示"App 端不显示"）。
+- `oneWay: true` 时这条行其实是**对方那一侧**的：`linkId` 是对方那行的 id，`label` 恒为 `null`（本侧没有行，不能拿对方的文案贴本侧卡），`reverseLabel` 才是对方页面上显示的文案。这种行的删除、保存都照常可用（保存 = 补齐成对）。
+
+#### `POST /api/admin/movies/{id}/links`
+
+请求：`{ "items": [ { "relatedMovieId": 13, "label": "第二季", "reverseLabel": "第一季", "sortNo": 10, "relationType": "season" } ] }`
+
+- 语义 = **添加或更新**：同一对已存在时按本次提交更新，`label/reverseLabel/sortNo/relationType` 传 `null` 表示不改动已有值（所以"编辑行内文案/排序"与"新增"共用这一个入口，不需要 PUT）。一次提交支持多条（后台多选批量添加），`items` 里同一目标出现两次只处理第一次。
+- `label` = 本片页面上给对方看的文案；`reverseLabel` = 对方页面上给本片看的文案；留空则客户端直接用对方片名（当前 web / Windows 卡面本来就只印片名）。> 64 字 → 400。
+- `relationType` 非法值按 `season` 落库。**`sortNo` 留空 = 按「对方那一部是第几季」落**：库里每季各自是一条 movie 记录，季号取它剧集的 `MIN(season_no)`（第一季→1、第九季→9）；反向那一行按**本片**的季号（各自的排序归各自那一页管，不能把这一页的数字贴到对方页上）。只有季号取不到（没有剧集）才退回「接在当前最大值后面 +10」。管理员显式给了数字则两侧都用它。
+- 校验：目标不存在 → 404；`relatedMovieId == id` → 400「不能与自身关联」；任一侧已达 50 条 → 400（**只有新增占额度**，更新已有条目不会被上限卡住）。对 `oneWay` 的那条提交一次，等于把本侧缺的行补上（算 `added`，之后 `oneWay` 消失）。
+- 响应 `data`：`{ "added": 1, "updated": 0, "deleted": 0, "total": 3 }`（一对算一条）。
+
+#### `DELETE /api/admin/movies/{id}/links/{linkId}`
+
+- `linkId` 只要**两侧任一行**涉及 `{id}` 就行（`oneWay` 的行自然也在这一侧删得掉），否则 404；删除时配对的另一条一起删。
+- 响应 `data`：同 POST 的 `MovieLinkOpResultVo`。
+
+#### `POST /api/admin/movies/{id}/links/resort`（按季号重排，2026-11-18）
+
+- 无请求体。把本片涉及的**两侧**所有 `relationType = season` 关联的 `sort_no` 一次性归位成「各自目标的季号」：这一页指向第九季的那行 = 9，第九季那页指向本片的行 = 本片自己的季号。
+- 只动 `season` 类型的行（衍生 / 自定义的次序归管理员自己排）；季号取不到（目标没有剧集）与已经对上的行一律不动。手动定过的数字会被覆盖 —— 这就是点这个按钮的语义，前端弹窗里写清楚。
+- 响应 `data`：同 POST 的 `MovieLinkOpResultVo`（`updated` = 实际改动的行数，两侧都算）。
+
+> 删除影片（§4.4）会一并清掉指向它的所有关联，`DeleteMovieResultVo` 多一个 `deletedLinks` 计数。
 
 ---
 

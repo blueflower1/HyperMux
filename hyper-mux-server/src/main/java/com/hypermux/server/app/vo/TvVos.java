@@ -51,10 +51,20 @@ public final class TvVos {
                                  int finished) {
     }
 
+    /**
+     * 关联影片（契约 §4.13 由后台手动建立）：同一部作品的其他季、衍生、前传。
+     * label = 后台填的卡片文案（如「第二季」），null 时客户端直接用 movie.title。
+     *
+     * 消费方只有 web 观看端与 Windows 桌面壳；mobile / tv 的模型里没有这个字段，
+     * Gson 忽略未知字段，旧客户端不受影响（见 §3.4 备注）。
+     */
+    public record RelatedMovieVo(String label, String relationType, int sortNo, MovieCardVo movie) {
+    }
+
     public record MovieDetailVo(Long id, String title, String originalTitle, Integer year, String coverUrl,
                                 String backdropUrl, Double rating, String area, String language, String intro,
                                 List<TagRefVo> tags, int episodeTotal, CategoryRefVo category,
-                                ProgressFullVo progress) {
+                                ProgressFullVo progress, List<RelatedMovieVo> relatedMovies) {
     }
 
     // ---- 3.5 剧集列表 ----

@@ -30,6 +30,7 @@ import ImagePicker from '@/components/ImagePicker.vue'
 import { imgUrl } from '@/utils/image'
 import EpisodeTable from '@/components/EpisodeTable.vue'
 import EpisodeImportModal from '@/components/EpisodeImportModal.vue'
+import MovieLinksPanel from '@/components/MovieLinksPanel.vue'
 import RatingInput from '@/components/RatingInput.vue'
 import TagPicker from '@/components/TagPicker.vue'
 import MetadataScrape from '@/components/MetadataScrape.vue'
@@ -510,7 +511,7 @@ async function doOffline() {
 function askDelete() {
   dialog.warning({
     title: '删除影片',
-    content: `将删除「${form.title}」及其 ${rows.value.length} 集剧集与相关观看断点，TV 端立即不可见，不可恢复。`,
+    content: `将删除「${form.title}」及其 ${rows.value.length} 集剧集、相关观看断点与「其他季」关联，TV 端立即不可见，不可恢复。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -811,6 +812,17 @@ function goBack() {
           <NDescriptionsItem label="导入目录">{{ importSourcePath ?? '—' }}</NDescriptionsItem>
           <NDescriptionsItem label="排序">{{ form.sortNo ?? 0 }}</NDescriptionsItem>
         </NDescriptions>
+
+        <div v-if="movieId != null" class="link-block">
+          <div class="link-head">
+            <span class="bar"></span>
+            <span class="link-title">其他季（关联影片）</span>
+            <NText depth="3" style="font-size: 12px">
+              手动建立、双向生效：详情页 / 播放页的「其他季」卡片由它来。
+            </NText>
+          </div>
+          <MovieLinksPanel :movie-id="movieId" :movie-title="form.title" />
+        </div>
       </section>
 
       <div class="bottom-bar">
@@ -1039,6 +1051,30 @@ function goBack() {
 }
 .meta-desc :deep(.n-descriptions-table-content) {
   color: #303743;
+}
+
+/* ==================== 关联影片（「其他季」） ==================== */
+.link-block {
+  padding: 0 18px 18px;
+  border-top: 1px dashed var(--hm-line, #f0f2f5);
+}
+.link-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 0 10px;
+}
+.link-head .bar {
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #f5820d, #ffb648);
+  flex: none;
+}
+.link-title {
+  font-size: 14px;
+  font-weight: 700;
 }
 
 /* ==================== 表单里的封面区 ==================== */

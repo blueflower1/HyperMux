@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
 import Cover from '@/components/Cover.vue'
 import DownloadSheet from '@/components/DownloadSheet.vue'
+import MovieCard from '@/components/MovieCard.vue'
+import RailScroller from '@/components/RailScroller.vue'
 import { getMovieDetail, getMovieSeasons } from '@/api'
 import type { MovieDetail, Season, VideoItem } from '@/api/types'
 import { errMsg } from '@/api/http'
@@ -26,6 +28,13 @@ const failed = ref(false)
 
 const activeSeason = ref(1)
 const introExpanded = ref(false)
+
+/* ---------- 关联影片（「其他季」，契约 §3.4 的 relatedMovies） ---------- */
+// 服务端已经按 sort_no 排好并用可见性铁律滤过（未上架 / 0 集不会出现），前端只管摆出来
+const related = computed(() => detail.value?.relatedMovies ?? [])
+const relatedTitle = computed(() =>
+  related.value.length && related.value.every((r) => r.relationType === 'season') ? '其他季' : '关联影片',
+)
 
 function flatVideos(): { video: VideoItem; seasonNo: number }[] {
   return seasons.value.flatMap((s) => s.videos.map((v) => ({ video: v, seasonNo: s.seasonNo })))
@@ -220,6 +229,18 @@ watch(movieId, load)
     <div v-else class="empty">
       <Icon name="film" :size="24" />
       <div class="empty-title">暂无可播放的剧集</div>
+    </div>
+
+    <!-- 其他季 / 关联影片：后台手动建立（契约 §3.4 relatedMovies），点卡片进那一部自己的详情页 -->
+    <div v-if="related.length" class="card related">
+      <div class="ep-head">
+        <h2 class="section-title" style="font-size: 15.5px">{{ relatedTitle }}</h2>
+      </div>
+      <RailScroller>
+        <div v-for="r in related" :key="r.movie.id" class="rail-card">
+          <MovieCard :movie="r.movie" rail />
+        </div>
+      </RailScroller>
     </div>
 
     <DownloadSheet

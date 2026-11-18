@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ArtPlayer from 'artplayer'
 import Icon from '@/components/Icon.vue'
+import MovieCard from '@/components/MovieCard.vue'
+import RailScroller from '@/components/RailScroller.vue'
 import { finishProgress, getMovieDetail, getMovieSeasons, getPlayUrl, reportProgress } from '@/api'
 import { getToken, errMsg } from '@/api/http'
 import { apiBase } from '@/stores/server'
@@ -17,6 +19,11 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToastStore()
 
+/* 双击画面切全屏是 artplayer 的类级默认（Artplayer.DBCLICK_FULLSCREEN），不在构造参数里，
+   播放时每次点击才读取，所以这里直接关掉：双击常常只是想看看控制条，误进全屏很难退出。
+   全屏仍可由播放器右下角按钮、或浏览器/桌面壳自身操作。 */
+;(ArtPlayer as unknown as { DBCLICK_FULLSCREEN: boolean }).DBCLICK_FULLSCREEN = false
+
 const movieId = computed(() => Number(route.params.id))
 const videoId = computed(() => {
   const q = route.query.videoId
@@ -30,6 +37,16 @@ const metaLoading = ref(true)
 
 const flat = computed(() => seasons.value.flatMap((s) => s.videos.map((v) => ({ v, s: s.seasonNo }))))
 const currentVideo = computed(() => flat.value.find((f) => f.v.id === videoId.value)?.v || null)
+const currentSeasonNo = computed(() => flat.value.find((f) => f.v.id === videoId.value)?.s ?? null)
+const isCurrentWatched = computed(() => currentVideo.value?.progress?.finished === 1)
+const watchedCount = computed(() => flat.value.filter((f) => f.v.progress?.finished === 1).length)
+
+/* ---------- 关联影片（「其他季」，契约 §3.4 的 relatedMovies） ---------- */
+// 只是浏览入口：点卡片进那一部的详情页，不参与「上一集/下一集」与自动连播（本期口径）
+const related = computed(() => detail.value?.relatedMovies ?? [])
+const relatedTitle = computed(() =>
+  related.value.length && related.value.every((r) => r.relationType === 'season') ? '其他季' : '关联影片',
+)
 
 /* ---------- 已下载集的本地播放（桌面端） ---------- */
 const localRecord = computed(() =>
@@ -605,12 +622,17 @@ onBeforeUnmount(() => {
 <template>
   <div class="play-page">
     <div class="play-topbar">
-      <button class="icon-btn" type="button" title="返回" @click="router.back()">
-        <Icon name="chev-left" :size="20" />
+      <button class="play-back" type="button" title="返回上一页" @click="router.back()">
+        <Icon name="chev-left" :size="17" /> 返回
       </button>
       <div class="play-title">
-        <template v-if="detail">{{ detail.title }}<span v-if="currentVideo" class="ep-tag">第{{ currentVideo.episodeNo }} 集</span></template>
-        <template v-else>加载中…</template>
+        <div class="play-name">{{ detail?.title || '加载中…' }}</div>
+        <div v-if="currentVideo" class="play-meta">
+          <span v-if="currentSeasonNo">第{{ currentSeasonNo }} 季</span>
+          <span>第{{ currentVideo.episodeNo }} 集</span>
+          <span v-if="currentVideo.duration">{{ fmtSec(currentVideo.duration) }}</span>
+          <span v-if="isCurrentWatched" class="meta-done">已看完</span>
+        </div>
       </div>
       <div v-if="castActive" class="cast-badge" :title="`来自「${castActive.from}」的投屏`">
         <Icon name="tv" :size="14" /> 投屏播放中
@@ -624,13 +646,8 @@ onBeforeUnmount(() => {
       >
         <Icon name="play" :size="12" /> 本地播放
       </button>
-      <button
-        class="icon-btn"
-        type="button"
-        title="回到影片页"
-        @click="router.push(`/movie/${movieId}`)"
-      >
-        <Icon name="chev-down" :size="18" />
+      <button class="play-detail" type="button" title="回到影片详情" @click="router.push(`/movie/${movieId}`)">
+        <Icon name="film" :size="15" /> 影片详情
       </button>
     </div>
 
@@ -674,35 +691,71 @@ onBeforeUnmount(() => {
       <button class="btn" :disabled="!prevNext.next" @click="goNext">
         下一集 <Icon name="skip-next" :size="14" />
       </button>
-      <button v-if="currentVideo" class="btn" @click="markFinished">
-        <Icon name="check" :size="15" /> 标记看完
+      <button
+        v-if="currentVideo"
+        class="btn"
+        :class="{ 'is-done': isCurrentWatched }"
+        :disabled="isCurrentWatched"
+        type="button"
+        @click="markFinished"
+      >
+        <Icon name="check" :size="15" /> {{ isCurrentWatched ? '已看完' : '标记看完' }}
       </button>
       <button v-if="castActive" class="btn cast-end" type="button" @click="endCast">
         <Icon name="x" :size="14" /> 结束投屏
       </button>
+      <div class="play-tips">
+        <span v-if="prevNext.next" class="play-autonext">本集播完自动接下一集</span>
+        <span v-if="isDesktopShell" class="play-keys">
+          <kbd>空格</kbd>播放 / 暂停<kbd>←</kbd><kbd>→</kbd>快退 / 快进 10s<kbd>↑</kbd><kbd>↓</kbd>音量
+        </span>
+      </div>
     </div>
 
     <div v-if="seasons.length" class="play-eps">
-      <h3 class="ep-title">全部剧集（{{ flat.length }}）</h3>
-      <div class="ep-grid">
-        <button
-          v-for="f in flat"
-          :key="f.v.id"
-          class="ep-btn"
-          :class="epState(f.v)"
-          type="button"
-          :title="`第${f.s}季 第${f.v.episodeNo}集${f.v.duration ? ' · ' + fmtSec(f.v.duration) : ''}`"
-          @click="selectVideo(f.v.id)"
-        >
-          {{ f.v.title || `第 ${f.v.episodeNo} 集` }}
-          <span
-            v-if="f.v.progress && f.v.progress.finished !== 1"
-            class="ep-progress"
-          ><i
-            :style="{ width: progressPct(f.v.progress.positionMs, f.v.progress.durationMs) + '%' }"
-          /></span>
-        </button>
+      <h3 class="ep-title">
+        剧集选集
+        <span class="ep-total">共 {{ flat.length }} 集 · 已看 {{ watchedCount }} 集</span>
+      </h3>
+      <div v-for="s in seasons" :key="s.seasonNo" class="ep-season">
+        <div v-if="seasons.length > 1" class="ep-season-head">
+          <span class="ep-season-name">第{{ s.seasonNo }} 季</span>
+          <span class="ep-season-count">{{ s.videos.length }} 集</span>
+        </div>
+        <div class="ep-grid">
+          <button
+            v-for="v in s.videos"
+            :key="v.id"
+            class="ep-btn"
+            :class="epState(v)"
+            type="button"
+            :title="`第${s.seasonNo}季 第${v.episodeNo}集${v.duration ? ' · ' + fmtSec(v.duration) : ''}`"
+            @click="selectVideo(v.id)"
+          >
+            {{ v.title || `第 ${v.episodeNo} 集` }}
+            <span
+              v-if="v.progress && v.progress.finished !== 1"
+              class="ep-progress"
+            ><i
+              :style="{ width: progressPct(v.progress.positionMs, v.progress.durationMs) + '%' }"
+            /></span>
+            <span v-if="v.progress && v.progress.finished === 1" class="ep-seen"><Icon name="check" :size="12" /></span>
+          </button>
+        </div>
       </div>
+    </div>
+
+    <!-- 其他季 / 关联影片（后台手动建立）：点卡片进那一部自己的详情页，当前影片照常停在这里 -->
+    <div v-if="related.length" class="play-related">
+      <h3 class="ep-title">
+        {{ relatedTitle }}
+        <span class="ep-total">共 {{ related.length }} 部</span>
+      </h3>
+      <RailScroller>
+        <div v-for="r in related" :key="r.movie.id" class="rail-card">
+          <MovieCard :movie="r.movie" rail />
+        </div>
+      </RailScroller>
     </div>
   </div>
 </template>

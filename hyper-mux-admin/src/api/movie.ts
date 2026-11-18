@@ -49,5 +49,7 @@ export const movieApi = {
     api.post<ScrapeImagesResultVo>(`/movies/${id}/scrape-images?overwrite=${overwrite}`),
   offline: (id: number) => api.post<{ id: number; status: MovieStatus }>(`/movies/${id}/offline`),
   remove: (id: number) =>
-    api.del<{ id: number; deletedEpisodes: number; deletedProgress: number }>(`/movies/${id}`),
+    api.del<{ id: number; deletedEpisodes: number; deletedProgress: number; deletedLinks: number }>(
+      `/movies/${id}`,
+    ),
 }
