@@ -34,15 +34,33 @@ function onThemeToggle(e: MouseEvent) {
   theme.toggleAt(e.clientX, e.clientY)
 }
 
+/* 退出登录：下拉里点一次只是「问」，必须再点「确认退出」才真的退出（与标题栏、我的页同一口径） */
+const confirmLogout = ref(false)
+
+function askLogout() {
+  confirmLogout.value = true
+}
+
+function toggleUserMenu() {
+  userMenuOpen.value = !userMenuOpen.value
+  if (!userMenuOpen.value) confirmLogout.value = false
+}
+
 function onLogout() {
   userMenuOpen.value = false
+  confirmLogout.value = false
   user.clear()
   router.push('/login')
 }
 
+function closeUserMenu() {
+  userMenuOpen.value = false
+  confirmLogout.value = false
+}
+
 function onDocClick(e: MouseEvent) {
   if (menuEl.value && !menuEl.value.contains(e.target as Node)) {
-    userMenuOpen.value = false
+    closeUserMenu()
   }
   if (dlEl.value && !dlEl.value.contains(e.target as Node)) {
     dlOpen.value = false
@@ -86,7 +104,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
         </button>
 
         <div class="user-menu" ref="menuEl">
-          <button class="user-chip" type="button" @click="userMenuOpen = !userMenuOpen">
+          <button class="user-chip" type="button" @click="toggleUserMenu">
             <span class="avatar">{{ initials }}</span>
             <span class="user-name">{{ user.user?.nickName || user.user?.username }}</span>
             <Icon name="chev-down" :size="14" :class="{ 'is-open': userMenuOpen }" />
@@ -100,12 +118,21 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
                   <div class="dropdown-sub">@{{ user.user?.username }}</div>
                 </div>
               </div>
-              <button class="dropdown-item" type="button" @click="() => (userMenuOpen = false, router.push('/me'))">
+              <button class="dropdown-item" type="button" @click="closeUserMenu(); router.push('/me')">
                 <Icon name="user" :size="16" /> 我的
               </button>
-              <button class="dropdown-item danger" type="button" @click="onLogout">
+              <button class="dropdown-item danger" type="button" @click="askLogout">
                 <Icon name="logout" :size="16" /> 退出登录
               </button>
+              <div v-if="confirmLogout" class="dropdown-confirm" role="dialog" aria-modal="true">
+                <div class="dropdown-confirm-text">退出登录？退出后需要重新登录才能继续观看。</div>
+                <div class="dropdown-confirm-actions">
+                  <button class="btn" type="button" @click="confirmLogout = false">取消</button>
+                  <button class="confirm-danger" type="button" @click="onLogout">
+                    <Icon name="logout" :size="13" /> 确认退出
+                  </button>
+                </div>
+              </div>
             </div>
           </transition>
         </div>

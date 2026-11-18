@@ -30,7 +30,15 @@ const expireText = computed(() => {
   return leftDay > 1 ? `登录信息剩 ${leftDay} 天过期` : fmtDate(exp)
 })
 
+/* 退出登录：二次确认（标题栏入口与本页入口同一套交互，避免误点丢登录态） */
+const confirmLogout = ref(false)
+
 function logout() {
+  confirmLogout.value = true
+}
+
+function doLogout() {
+  confirmLogout.value = false
   user.clear()
   router.push('/login')
 }
@@ -89,7 +97,7 @@ onMounted(refreshCast)
 </script>
 
 <template>
-  <div style="max-width: 560px">
+  <div class="me-wrap">
     <div class="me-card card">
       <div class="avatar me-avatar">{{ initials }}</div>
       <div style="min-width: 0">
@@ -187,8 +195,22 @@ onMounted(refreshCast)
       </div>
     </div>
 
-    <button class="me-logout" type="button" @click="logout">
-      <Icon name="logout" :size="16" /> 退出登录
-    </button>
+    <div class="me-logout-wrap">
+      <div v-if="confirmLogout" class="confirm-pop card" role="dialog" aria-modal="true">
+        <div class="confirm-pop-title">退出登录？</div>
+        <div class="confirm-pop-text">
+          退出后需要重新登录（扫码或账号密码）才能继续观看，缓存与观看历史不会丢失。
+        </div>
+        <div class="confirm-pop-actions">
+          <button class="btn" type="button" @click="confirmLogout = false">取消</button>
+          <button class="confirm-danger" type="button" @click="doLogout">
+            <Icon name="logout" :size="13" /> 确认退出
+          </button>
+        </div>
+      </div>
+      <button class="me-logout" type="button" @click="logout">
+        <Icon name="logout" :size="16" /> 退出登录
+      </button>
+    </div>
   </div>
 </template>

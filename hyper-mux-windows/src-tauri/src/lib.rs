@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, RunEvent, State, WindowEvent};
+use tauri::{include_image, Emitter, Manager, RunEvent, State, WindowEvent};
 
 /// 播放页关闭防误触状态：前端进入/离开播放页时经 set_close_guard 开关。
 pub struct CloseGuard {
@@ -92,6 +92,10 @@ pub fn run() {
         let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
         let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
         let _tray = TrayIconBuilder::new()
+            // 托盘图标必须显式给：不设 icon 时走系统默认，实测 Windows 通知区只剩一块深色方框（看不见图标）。
+            // 用 32x32 而不是 icon.png(512)：include_image 把原始像素写进二进制，小图够用又不会虚胖。
+            .icon(include_image!("icons/32x32.png"))
+            .tooltip("HyperMux")
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
