@@ -11,9 +11,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 离线断点补报的触发点（单一入口）：
- * ① **App 启动时**立即尝试补报一次（上次离线退出/被杀进程留下的队列）；
- * ② **[NetworkMonitor] 离线 → 在线**时补报（网络恢复即补，用户不必等下一次切集）。
+ * 断点上报的出口（单一入口）：
+ * ① **即时提交** [submit]：播放页的暂停 / 退后台 / 退出播放页 / 播完那几次上报；
+ * ② **离线补报**：App 启动时补一次（上次离线退出/被杀进程留下的队列），
+ *    以及 [NetworkMonitor] **离线 → 在线**时补报（网络恢复即补，用户不必等下一次切集）。
  *
  * 顺序补报 + 失败保留 + 单飞都在 [PendingProgressStore.flush] 里保证，这里只负责"何时触发"，
  * 因此重复触发（例如启动时本来就在线，会先手动补一次、再由 isOnline 的初值再补一次）不会造成重复提交。
@@ -36,6 +37,33 @@ class ProgressSync @Inject constructor(
             networkMonitor.isOnline.collect { online ->
                 if (online) runCatching { flushOnce() }
             }
+        }
+    }
+
+    /**
+     * 即时提交一条断点（播放页用）。
+     *
+     * 跑在本类自己的 scope 上，**不随 ViewModel 清空而取消**：播放页那几次"最后一次上报"都发生在
+     * NavBackStackEntry 被销毁的当口，走 viewModelScope 会被中途掐掉（请求发不出去、连离线队列都写不进去），
+     * 因此退出/退后台那几次一律从这条不会被取消的入口出去。失败转入离线队列，等 [flushOnce] 补报。
+     */
+    fun submit(videoId: Long, positionMs: Long, durationMs: Long, finished: Int? = null) {
+        if (positionMs < 0) return
+        scope.launch {
+            runCatching { playbackRepo.reportProgress(videoId, positionMs, durationMs, finished) }
+                .onFailure {
+                    Log.w(TAG, "断点上报失败，转入离线队列：videoId=$videoId", it)
+                    runCatching {
+                        store.enqueue(
+                            PendingProgress(
+                                videoId = videoId,
+                                positionMs = positionMs,
+                                durationMs = durationMs,
+                                ts = System.currentTimeMillis()
+                            )
+                        )
+                    }.onSuccess { kick() }
+                }
         }
     }
 

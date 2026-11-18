@@ -302,6 +302,8 @@ interface ApiService {
 
 见 §6。全屏横屏（进入自动横屏 + 方向锁定，退出恢复）；竖屏下为带控制条的半屏播放亦可（MVP：**强制横屏**，简单稳定——决策 D6）。
 
+**屏幕常亮**：播放页在位期间给窗口加 `FLAG_KEEP_SCREEN_ON`（与 TV 端 §9.2 同一做法：进播放页 `addFlags` / 离开 `clearFlags`），播放中不会被系统超时锁屏。该 flag 只在窗口可见且有焦点时生效，所以**用户按电源键照样能锁屏**，退到后台/离开播放页后系统超时与屏保策略照常恢复，不需要任何权限（media3 的 `PlayerView` 不会替我们加，1.7.1 里没有任何相关代码）。
+
 ### 5.7 历史页 `/history`
 
 - 数据：`GET /api/app/history?limit=50`（updateTime 降序）。
@@ -359,7 +361,8 @@ IDLE → PREPARING → PLAYING ⇄ PAUSED → ENDED ──(1.5s)──▶ 下一
   │      │           │                                   （无下一集 → 回详情页 + finished 上报）
   ├──→ ERROR ──(分类 §6.5)── 自动重试×1(4s) / 手动 / 不换集
 断点上报：PLAYING 每 10s(协程 tick) + PAUSE 时 + 退后台/离开页时 + ENDED 时(置满)
-onStop → if(isPlaying) pause() + 上报；onDestroy → release()
+onStop → 取消连播 + playWhenReady=false + 上报（PlayerScreen 的 LifecycleEventObserver 闸门）
+onDestroy → release()；不在前台时出现的"起播意图"（迟到的 play-url / 自动重试 / 连播换集）一律被监听器按回 false
 ```
 
 ### 6.4 手势层（手机端替代遥控器键，对齐 TV 端 §6 键位语义）
@@ -451,6 +454,8 @@ onStop → if(isPlaying) pause() + 上报；onDestroy → release()
 | 历史删除 | `POST finish {action:"remove"}` |
 | App 进程被杀 | 丢失 ≤10s（可接受） |
 | 断点展示 | 首页 continueWatching / 卡片角标 / 集网格进度条——**客户端零计算**，全部信任接口 |
+
+> **退后台/退出播放页那一次怎么保证落地**：`PlayerScreen` 的 `LifecycleEventObserver` 在 `ON_STOP` 时「取消连播 + `playWhenReady = false` + 上报」，播放器监听器再把"不在前台时的起播意图"按回 `false`（迟到的 play-url、错误自动重试、连播换集都走 `play()`），所以黑屏/后台不会再播。上报本身走 `ProgressSync.submit()`（自带 scope）而不是 `viewModelScope`：那一次正好落在 NavBackStackEntry 被销毁、ViewModel 被清空的当口，`viewModelScope` 会把在途请求连离线入队一起取消掉，最后一段进度就丢了。
 
 ---
 

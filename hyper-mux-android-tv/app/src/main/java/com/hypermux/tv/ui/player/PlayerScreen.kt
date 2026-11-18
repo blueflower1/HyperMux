@@ -81,6 +81,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -207,6 +210,35 @@ fun PlayerScreen(
         }
     }
 
+    // ---- 前台闸门：退到后台 / 锁屏 = 停播（§7「退后台即时上报」的真正落点，与手机端同一套）----
+    // 播放器只挂在 composition 上（上面 DisposableEffect(controller) → onDispose 才 release）：
+    // Home / 屏保 / 切应用时 Activity 只是 onStop、composable 不会 dispose，于是 ExoPlayer 仍
+    // playWhenReady=true 在后台出声、10s 断点循环照常往前推、连播倒计时照常换下一集。
+    // ON_STOP 一律：取消连播 + 停播 + 交出断点；回前台保持暂停、不自动续播，由用户自己按播放。
+    val appInForeground = remember { mutableStateOf(true) }
+    val playerLifecycle = LocalLifecycleOwner.current
+    DisposableEffect(playerLifecycle, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> appInForeground.value = true
+                Lifecycle.Event.ON_STOP -> {
+                    appInForeground.value = false
+                    vm.cancelAutoNext()
+                    runCatching {
+                        controller.player.playWhenReady = false
+                        vm.reportProgress(
+                            controller.player.currentPosition,
+                            controller.player.duration.coerceAtLeast(0L)
+                        )
+                    }
+                }
+                else -> Unit
+            }
+        }
+        playerLifecycle.lifecycle.addObserver(observer)
+        onDispose { playerLifecycle.lifecycle.removeObserver(observer) }
+    }
+
     // ---- 状态 ----
     val playUrl by vm.playUrl.collectAsStateWithLifecycle(initialValue = null)
     val isLoadingUrl by vm.isLoadingUrl.collectAsStateWithLifecycle(initialValue = true)
@@ -229,8 +261,10 @@ fun PlayerScreen(
     var controlTick by remember { mutableIntStateOf(0) }
     var seekHint by remember { mutableStateOf<String?>(null) }
     var resumeHint by remember { mutableStateOf<String?>(null) }
-    /** 投屏拉起的播放：进页面先给一条 6s 的「投屏播放中 · 来自 X」提示（顶栏徽标是常驻版） */
+    /** 投屏拉起的播放：进页面先给一条 6s 的「投屏播放中 · 来自 X」提示（顶栏徽标是常驻版，可现场关闭） */
     var castHint by remember { mutableStateOf<String?>(null) }
+    /** 顶栏「投屏播放中」徽标是否显示：遥控器可关掉（只隐藏提示，投屏与播放不受影响） */
+    var castBadgeVisible by remember { mutableStateOf(true) }
     // 防误触退出：第一次 BACK 只给提示，2s 内再按一次才真正退出
     var exitHint by remember { mutableStateOf(false) }
     var lastBackAt by remember { mutableStateOf(0L) }
@@ -352,6 +386,12 @@ fun PlayerScreen(
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // 后台闸门：不在前台时，任何"起播意图"都立刻按回去 —— 迟到的 play-url、错误自动重试、
+                // 连播换集都会经 play() 把 playWhenReady 置 true，这里统一拦掉，退后台后不会自己播。
+                if (playWhenReady && !appInForeground.value) {
+                    controller.player.playWhenReady = false
+                    return
+                }
                 uiPlaying.value = playWhenReady
             }
 
@@ -739,7 +779,8 @@ fun PlayerScreen(
                 title = movie?.title ?: "播放中",
                 episodeLabel = currentEpisodeLabel(seasons, targetVideoId),
                 categoryName = movie?.category?.name,
-                castSender = if (vm.isCastPlay) vm.castSenderName ?: "手机端" else null,
+                castSender = if (vm.isCastPlay && castBadgeVisible) vm.castSenderName ?: "手机端" else null,
+                onDismissCastBadge = { castBadgeVisible = false },
                 onBack = { exitPlayer() }
             )
         }
@@ -1284,13 +1325,14 @@ private fun Modifier.keySeekBar(
 
 /* =========================== 覆盖层 =========================== */
 
-/** 顶部信息栏：返回按钮（可聚焦）+ 片名 + 集号 + 分类 + 评分 + 投屏徽标 */
+/** 顶部信息栏：返回按钮（可聚焦）+ 片名 + 集号 + 分类 + 评分 + 投屏徽标（可聚焦关闭） */
 @Composable
 private fun TopInfoBar(
     title: String,
     episodeLabel: String?,
     categoryName: String?,
     castSender: String? = null,
+    onDismissCastBadge: () -> Unit = {},
     onBack: () -> Unit
 ) {
     Row(
@@ -1331,19 +1373,29 @@ private fun TopInfoBar(
                 color = Color(0xB3FFFFFF),
                 maxLines = 1
             )
-            // 投屏徽标（契约 §3.13）：让看电视的人知道这一集是手机投过来的
+            // 投屏徽标（契约 §3.13）：让看电视的人知道这一集是手机投过来的；
+            // 带一个可聚焦的关闭按钮 —— 嫌碍眼就关掉提示，投屏本身不受影响（结束播放照常收尾）
             if (castSender != null) {
                 Spacer(Modifier.height(Spacing.xs))
-                Box(
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(Color(0x3318C22B))
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                        .background(Color(0x3318C22B)),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "投屏播放中 · 来自 $castSender",
                         fontSize = TvType.badge,
-                        color = Color(0xFF8FE6A0)
+                        color = Color(0xFF8FE6A0),
+                        modifier = Modifier.padding(start = 12.dp, top = 3.dp, bottom = 3.dp)
+                    )
+                    HyperIconButton(
+                        icon = PlayerIcons.Close,
+                        contentDescription = "关闭投屏提示",
+                        onClick = onDismissCastBadge,
+                        size = 26.dp,
+                        iconSize = 14.dp,
+                        tint = Color(0xB3FFFFFF)
                     )
                 }
             }

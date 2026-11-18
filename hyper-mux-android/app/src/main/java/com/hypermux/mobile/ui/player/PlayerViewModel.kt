@@ -12,8 +12,6 @@ import com.hypermux.mobile.data.model.PlayUrlVo
 import com.hypermux.mobile.data.model.SeasonsVo
 import com.hypermux.mobile.data.model.VideoItemVo
 import com.hypermux.mobile.data.repo.ContentRepo
-import com.hypermux.mobile.data.repo.PendingProgress
-import com.hypermux.mobile.data.repo.PendingProgressStore
 import com.hypermux.mobile.data.repo.PlaybackRepo
 import com.hypermux.mobile.data.repo.ProgressSync
 import com.hypermux.mobile.data.repo.SettingsRepo
@@ -49,10 +47,8 @@ class PlayerViewModel @Inject constructor(
     private val contentRepo: ContentRepo,
     private val state: SavedStateHandle,
     private val settingsRepo: SettingsRepo,
-    private val pendingStore: PendingProgressStore,
     private val progressSync: ProgressSync,
     val cacheManager: MediaCacheManager,
-    private val castState: com.hypermux.mobile.data.cast.CastState,
     private val castReceiver: com.hypermux.mobile.data.cast.CastReceiver
 ) : ViewModel() {
 
@@ -78,9 +74,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     // ---- 投屏（M7，契约 §3.13）----
-
-    /** 当前生效的投屏：非空 = TV 正在播这一集，手机必须停止本地播放且不再上报断点 */
-    val castActive: StateFlow<com.hypermux.mobile.data.model.CastBriefVo?> = castState.active
+    // 投送侧不再影响本播放页：投出即送达，手机照常播自己的、照常上报断点；
+    // 接收侧起播位置由 castReceiver.takeCastStartMs 在 loadPlayUrl 时取用。
 
     // ---- 缓存状态（播放页「缓存」按钮 / 角标） ----
 
@@ -256,13 +251,8 @@ class PlayerViewModel @Inject constructor(
      * 会在补报到片尾位置后把这一集标成看完，因此不需要额外的 finished 标记字段）。
      */
     fun onEpisodeEnded(positionMs: Long, durationMs: Long) {
+        progressSync.submit(_targetVideoId.value, positionMs, durationMs, finished = 1)
         viewModelScope.launch {
-            val ok = runCatching {
-                playbackRepo.reportProgress(
-                    _targetVideoId.value, positionMs, durationMs, finished = 1
-                )
-            }.isSuccess
-            if (!ok) enqueuePending(positionMs, durationMs)
             val next = nextVideo()
             if (next != null) {
                 val seasonNo = _seasons.value?.seasons
@@ -297,39 +287,18 @@ class PlayerViewModel @Inject constructor(
     /**
      * 断点上报（§7）：播放中 10s 节流 + 暂停/退后台/退出即时；失败静默不阻塞播放。
      *
+     * 走 [ProgressSync.submit]（自带 scope）而不是 viewModelScope：退出播放页/退后台那一次正好落在
+     * NavBackStackEntry 被销毁、ViewModel 被清空的当口，viewModelScope 会把在途请求连离线入队一起取消掉，
+     * 于是"最后看到哪"丢了。换成不会被取消的出口后，退出那一次必定落地（或必定入队等补）。
+     *
      * 离线降级：上报失败（异常/无网）时**写入本地待补报队列**（按 videoId 去重只留最新），
      * 网络恢复后由 [ProgressSync] 顺序补报；服务端 detail.progress 仍是续播的唯一来源，
      * 本地队列只做"欠账补偿"，因此不影响现有续播逻辑。
      */
     fun reportProgress(positionMs: Long, durationMs: Long, finished: Int? = null) {
         if (positionMs < AppConfig.PROGRESS_MIN_POSITION_MS) return
-        // 投屏闸门（M7）：TV 正在播这一集时手机不再写断点 ——
-        // play_progress 是 (user_id, video_id) 的 upsert，两端同时写会互相把对方覆盖回旧位置。
-        if (castState.isCasting) return
-        viewModelScope.launch {
-            runCatching {
-                playbackRepo.reportProgress(
-                    _targetVideoId.value, positionMs, durationMs, finished
-                )
-            }.onFailure {
-                Log.w(TAG, "reportProgress failed，转入离线队列", it)
-                enqueuePending(positionMs, durationMs)
-            }
-        }
-    }
-
-    /** 把一条断点写进离线队列，并顺手踢一次补报（在线时立刻落地） */
-    private suspend fun enqueuePending(positionMs: Long, durationMs: Long) {
-        runCatching {
-            pendingStore.enqueue(
-                PendingProgress(
-                    videoId = _targetVideoId.value,
-                    positionMs = positionMs,
-                    durationMs = durationMs,
-                    ts = System.currentTimeMillis()
-                )
-            )
-        }.onSuccess { progressSync.kick() }
+        // 投屏送达后两端各自播、各自写断点（后写覆盖）；投送端不再跟踪，也就不再闸门
+        progressSync.submit(_targetVideoId.value, positionMs, durationMs, finished)
     }
 
     /** 历史/详情入口的集标题（角标用） */

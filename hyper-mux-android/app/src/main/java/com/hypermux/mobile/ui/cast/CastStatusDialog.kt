@@ -31,14 +31,14 @@ fun CastStatusDialog(vm: CastViewModel) {
             title = { DialogTitle("投屏请求") },
             text = {
                 Text(
-                    text = "正在等待「${w.targetName}」确认…\n目标端（电视 / 网页端 / 电脑端 / 手机端）会弹出确认窗口（默认「是」，倒计时结束自动播放）。",
+                    text = "正在等待「${w.targetName}」确认…\n目标端（电视 / 网页端 / 电脑端 / 手机端）会弹出确认窗口（默认「是」，倒计时结束自动播放）；确认后目标端直接跳转开播，之后在目标端操作。",
                     fontSize = 13.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
             confirmButton = {
                 HyperButton(
-                    text = "取消投屏",
+                    text = "取消请求",
                     onClick = { vm.cancelCast() },
                     style = HyperButtonStyle.Ghost
                 )
@@ -48,7 +48,7 @@ fun CastStatusDialog(vm: CastViewModel) {
 
     outcome?.let { o ->
         val (title, body) = when (o) {
-            is CastOutcome.Accepted -> "投屏成功" to "「${o.targetName}」已接受你远程投屏的请求。"
+            is CastOutcome.Accepted -> "投屏成功" to "「${o.targetName}」已接受并开始播放。手机端投屏流程到此结束，不再跟踪；结束投屏请在目标端上操作。"
             is CastOutcome.Rejected -> "投屏被拒绝" to "目标端已拒绝投屏请求。"
             is CastOutcome.Expired -> "投屏未生效" to "目标端未响应，请稍后重试。"
             is CastOutcome.Cancelled -> "已取消投屏" to "投屏请求已取消。"

@@ -89,6 +89,7 @@ downloads   /  downloads/{movieId}    （我的下载：一级 + 二级）
 - `PlayerController`：`NextRenderersFactory`（FFmpeg 软解兜底）+ `HardwareOnlyCodecSelector` + 解码回退 + `DefaultLoadControl(15s,50s,2.5s,5s)` + ±10s seek；网络/本地文件双源。
 - 播放状态机：`IDLE→PREPARING→PLAYING⇄PAUSED→ENDED→(1.5s)下一集`；错误分类（网络/HTTP4xx/解码/其他）自动重试 ×1。
 - 断点：播放中 10s 节流、暂停/退后台/离开页即时上报、`position<3s` 不上报；续播阈值 `positionMs>30s 且 < duration-30s`；离线写 `PendingProgressStore` 待补报。
+- 前台闸门（与手机端同一套）：`PlayerScreen` 的 `LifecycleEventObserver` 在 `ON_STOP` 时「取消连播 + `playWhenReady = false` + 上报」，播放器监听器再把"不在前台时的起播意图"按回 `false`（迟到的 play-url、错误自动重试、连播换集都走 `play()`）——退到后台/锁屏后不会再出声。退出与退后台那一次上报走 `ProgressSync.submit()`（自带 scope），不随 ViewModel 清空而取消。
 - 数据层：`ApiService`（Retrofit，`R<T>{code,msg,data}`）→ `SafeApiCall` → `AuthRepo/ContentRepo/PlaybackRepo/SettingsRepo`；`AuthInterceptor`（Bearer + 401 失效）、`ServerUrlInterceptor`（热切 baseUrl）、`NetworkMonitor`（离线黄条）、`CacheStore`（home/列表第 1 页 JSON 降级）。
 
 ---

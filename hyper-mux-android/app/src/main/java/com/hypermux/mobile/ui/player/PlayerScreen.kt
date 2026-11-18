@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -98,6 +99,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -120,7 +124,6 @@ import com.hypermux.mobile.ui.common.ratingText
 import com.hypermux.mobile.ui.cast.CastButton
 import com.hypermux.mobile.ui.cast.CastDeviceSheet
 import com.hypermux.mobile.ui.cast.CastIncomingBadge
-import com.hypermux.mobile.ui.cast.CastSentOverlay
 import com.hypermux.mobile.ui.cast.CastStatusDialog
 import com.hypermux.mobile.ui.cast.CastViewModel
 import com.hypermux.mobile.ui.layout.LocalLayoutProfile
@@ -177,9 +180,8 @@ fun PlayerScreen(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // ---- 投屏（M7，契约 §3.13）：本机既投送也接收 ----
+    // ---- 投屏（M7，契约 §3.13）：本机既投送也接收；投送只负责送达（投出后不再跟踪） ----
     val castVm: CastViewModel = hiltViewModel()
-    val castActive by castVm.active.collectAsStateWithLifecycle()
     val castEnabled by castVm.enabled.collectAsStateWithLifecycle()
     // 接收侧：非空 = 这一集是别人投过来、本机正在播
     val incomingActiveId by castVm.incomingActiveId.collectAsStateWithLifecycle()
@@ -239,6 +241,49 @@ fun PlayerScreen(
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+
+    // ---- 屏幕常亮（与 TV 端同一做法：只在播放页施加，离开播放页清掉）----
+    // FLAG_KEEP_SCREEN_ON 只抑制"超时锁屏"，而且只在窗口可见、有焦点时生效：
+    // 用户按电源键照样能锁屏；退到后台 / 离开播放页后系统的超时与屏保策略照常恢复。不需要任何权限。
+    // （media3 不会替我们加：media3-ui 1.7.1 里没有任何 keepScreenOn 相关代码。）
+    DisposableEffect(Unit) {
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // ---- 前台闸门：退到后台 / 锁屏 = 停播（§7「退后台即时上报」的真正落点）----
+    // 播放器此前只挂在 composition 上（上面 DisposableEffect(controller) → onDispose 才 release）：
+    // 按 Home、锁屏时 Activity 只是 onStop、composable 不会 dispose，于是
+    //   · ExoPlayer 仍是 playWhenReady=true → 黑屏后台继续出声；
+    //   · 10s 断点循环照常跑 → 人没在看、进度却继续往前推（续播位置被推后）；
+    //   · 连播倒计时照常跑完 → 黑屏里自动换下一集。
+    // ON_STOP 一律：取消连播 + 停播 + 交出断点；回前台保持暂停、不自动续播，由用户自己按播放。
+    // （投屏接收端同一口径：App 退后台 30s 后服务端就把本机标成离线。）
+    val appInForeground = remember { mutableStateOf(true) }
+    val playerLifecycle = LocalLifecycleOwner.current
+    DisposableEffect(playerLifecycle, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> appInForeground.value = true
+                Lifecycle.Event.ON_STOP -> {
+                    appInForeground.value = false
+                    vm.cancelAutoNext()
+                    runCatching {
+                        controller.player.playWhenReady = false
+                        vm.reportProgress(
+                            controller.player.currentPosition,
+                            controller.player.duration.coerceAtLeast(0L)
+                        )
+                    }
+                }
+                else -> Unit
+            }
+        }
+        playerLifecycle.lifecycle.addObserver(observer)
+        onDispose { playerLifecycle.lifecycle.removeObserver(observer) }
     }
 
     // 退出播放页：亮度交还给系统（-1 = 跟随系统自动亮度），否则会把整个 App 锁在手动亮度上
@@ -447,6 +492,12 @@ fun PlayerScreen(
 
             // 图标态与"4s 自动隐藏"都用 playWhenReady 驱动（见 uiPlayingState 注释）
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                // 后台闸门：不在前台时，任何"起播意图"都立刻按回去。迟到的 play-url、错误自动重试、
+                // 连播换集都会经 play() 把 playWhenReady 置 true，这里统一拦掉 —— 黑屏里不会自己播。
+                if (playWhenReady && !appInForeground.value) {
+                    controller.player.playWhenReady = false
+                    return
+                }
                 uiPlayingState.value = playWhenReady
             }
 
@@ -685,16 +736,6 @@ fun PlayerScreen(
         progress.positionMs = target
     }
 
-    /**
-     * 投屏生效 → 立刻停止本地播放（避免手机与电视双声道）。
-     * 断点由电视侧走现有 10s 节流上报，手机不再写（见 PlayerViewModel 的投屏闸门）。
-     */
-    LaunchedEffect(castActive, controller) {
-        if (castActive != null) {
-            controller.player.playWhenReady = false
-        }
-    }
-
     /** 打开投屏目标选择弹层（只列同账号在线的电视 / 网页端 / 电脑端 / 手机端设备） */
     fun openCastSheet() {
         castVm.openSheet()
@@ -742,15 +783,6 @@ fun PlayerScreen(
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             PlayerSurface(controller = controller, modifier = videoModifier)
 
-            // 投屏生效：整块盖住播放区（手机只投送、不提供任何遥控控件），并停掉手势层
-            castActive?.let { ca ->
-                CastSentOverlay(
-                    active = ca,
-                    onCancel = { castVm.cancelCast() },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
             // 接收侧徽标：这一集是别人投过来、本机正在播。点「结束投屏」只结束投屏，不停本机播放。
             incomingActiveId?.let {
                 CastIncomingBadge(
@@ -767,7 +799,7 @@ fun PlayerScreen(
                 controller = controller,
                 activity = activity,
                 audioManager = audioManager,
-                enabled = !locked && castActive == null,
+                enabled = !locked,
                 onSingleTap = {
                     controlsVisible = !controlsVisible
                     controlTick++
@@ -789,7 +821,8 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // 半透明渐变浮层控制条（顶部/底部各一层 gradient）
+            // 半透明渐变浮层控制条（顶部 title 栏 / 底部进度条各一层 gradient）：
+            // 单击画面（GestureLayer.onSingleTap）→ 两层一起弹出，再单击收起；4s 无操作自动收起。
             LandscapeControls(
                 visible = controlsVisible && !locked,
                 title = title,
@@ -821,7 +854,6 @@ fun PlayerScreen(
                 cacheCached = cacheCached,
                 cachePercent = cachePercent,
                 onCache = { cacheCurrentEpisode() },
-                castOn = castActive != null,
                 castEnabled = castEnabled,
                 onCast = { openCastSheet() },
                 modifier = Modifier.fillMaxSize()
@@ -982,15 +1014,6 @@ fun PlayerScreen(
             Box(modifier = videoModifier.background(Color.Black)) {
                 PlayerSurface(controller = controller, modifier = Modifier.fillMaxSize())
 
-                // 投屏生效：盖住播放区（手机只投送），并停掉竖屏手势
-                castActive?.let { ca ->
-                    CastSentOverlay(
-                        active = ca,
-                        onCancel = { castVm.cancelCast() },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-
                 // 接收侧徽标：这一集是别人投过来、本机正在播。点「结束投屏」只结束投屏，不停本机播放。
                 incomingActiveId?.let {
                     CastIncomingBadge(
@@ -1007,7 +1030,7 @@ fun PlayerScreen(
                     controller = controller,
                     activity = activity,
                     audioManager = audioManager,
-                    enabled = castActive == null,
+                    enabled = true,
                     // 竖屏单击：切换控制浮层显隐（面板打开时先收面板）；默认状态为"显示"
                     onSingleTap = {
                         if (showSpeed) {
@@ -1049,7 +1072,6 @@ fun PlayerScreen(
                     cacheCached = cacheCached,
                     cachePercent = cachePercent,
                     onCache = { cacheCurrentEpisode() },
-                    castOn = castActive != null,
                     castEnabled = castEnabled,
                     onCast = { openCastSheet() },
                     modifier = Modifier.align(Alignment.BottomCenter)
@@ -2047,7 +2069,6 @@ private fun PortraitControlOverlay(
     cacheCached: Boolean,
     cachePercent: Int?,
     onCache: () -> Unit,
-    castOn: Boolean,
     castEnabled: Boolean,
     onCast: () -> Unit,
     modifier: Modifier = Modifier
@@ -2124,7 +2145,7 @@ private fun PortraitControlOverlay(
                 )
                 // 投屏（M7）：目标 = 同账号电视 / 网页端 / 电脑端 / 另一台手机；投送侧不遥控；管理后台关掉功能时整个按钮不出现
                 if (castEnabled) {
-                    CastButton(casting = castOn, onClick = onCast, size = 32.dp)
+                    CastButton(onClick = onCast, size = 32.dp)
                 }
                 // 下一集：无下一集时隐藏
                 if (hasNext) {
@@ -2155,8 +2176,11 @@ private fun PortraitControlOverlay(
  * ========================================================================= */
 
 /**
- * 横屏控制条：顶部（返回 / 片名·第N集 / 选集 / 锁屏）+ 底部（播放暂停 / 时间 / 进度条 /
+ * 横屏控制条：顶部（返回 / 片名·第N集 / 缓存 / 投屏 / 选集 / 锁屏 / 时钟·电量）+ 底部（播放暂停 / 时间 / 进度条 /
  * 下一集 / 倍速 / 退出全屏）。两侧用 `Brush.verticalGradient` 半透明渐变压住画面，保证白字可读。
+ *
+ * 单击画面 → 外层把 `controlsVisible` 翻成 true，这块（顶部 title 栏 + 底部进度条）**一起弹出**；
+ * 时钟与电量在 [PlayerStatusCluster] 里现读，只活在本浮层作用域内（隐藏后不注册广播、不起 tick）。
  *
  * 交互计时：条上的 pointerInput 只做一件小事 —— `awaitFirstDown` 时上报 onInteraction，
  * 让"4s 自动隐藏"重新计时（父子节点同处命中链，按钮点击也会触发，无需给每个按钮加回调）。
@@ -2184,7 +2208,6 @@ private fun LandscapeControls(
     cacheCached: Boolean,
     cachePercent: Int?,
     onCache: () -> Unit,
-    castOn: Boolean,
     castEnabled: Boolean,
     onCast: () -> Unit,
     modifier: Modifier = Modifier
@@ -2254,7 +2277,7 @@ private fun LandscapeControls(
                 )
                 // 投屏（M7）：目标 = 同账号电视 / 网页端 / 电脑端 / 另一台手机；投送侧不遥控；管理后台关掉功能时整个按钮不出现
                 if (castEnabled) {
-                    CastButton(casting = castOn, onClick = onCast)
+                    CastButton(onClick = onCast)
                 }
                 HyperIconButton(
                     icon = PlayerIcons.Episodes,
@@ -2268,6 +2291,10 @@ private fun LandscapeControls(
                     onClick = onLock,
                     tint = Color.White
                 )
+                // 时钟 + 电量：全屏沉浸把系统状态栏藏了，这两项跟着一起没了（竖屏时状态栏还在，
+                // 所以只有横屏 title 栏需要补回）。放在最右角 = 用户平时看时间/电量的同一个位置。
+                StatusDivider()
+                PlayerStatusCluster(modifier = Modifier.padding(start = Spacing.sm))
             }
 
             Spacer(Modifier.weight(1f))

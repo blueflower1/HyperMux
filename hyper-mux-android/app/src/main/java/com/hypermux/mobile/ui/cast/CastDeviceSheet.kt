@@ -88,7 +88,7 @@ fun CastDeviceSheet(
         }
 
         Text(
-            text = "投屏后目标端会从手机当前的位置接着播；手机端只负责投送，不能遥控目标端。",
+            text = "投屏后目标端会从手机当前的位置接着播；送达后手机端不再跟踪这条投屏，结束请在目标端上操作。",
             fontSize = 11.5.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)

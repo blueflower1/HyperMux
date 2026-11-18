@@ -187,12 +187,11 @@ fun AppNavigation() {
         }
     }
 
-    // 投屏（M7，契约 §3.13）：登录态确立即注册本机设备 + 恢复当前投屏状态（重启/切后台回来不丢）
+    // 投屏（M7，契约 §3.13）：登录态确立即注册本机设备（投送"投出即送达"，无需恢复投屏状态）
     LaunchedEffect(session != null) {
         if (session != null) {
             castVm.cast.registerSelf()
             castVm.cast.refreshConfig()
-            castVm.cast.restore()
         } else {
             // 登出/会话失效：投送与接收两条线都不把上一账号的状态带过去
             castVm.clearAll()

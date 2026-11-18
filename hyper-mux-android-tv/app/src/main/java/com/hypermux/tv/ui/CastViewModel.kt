@@ -97,7 +97,7 @@ class CastViewModel @Inject constructor(
                                 _activeCastId.value = null
                                 _stopRequested.tryEmit(id)
                                 // TV 自己 BACK 退出时已先清掉 activeCastId，不会走到这里 → 这条提示只针对"别人替我停的"
-                                _notice.value = "投屏已结束：手机端已取消，或被同账号其它设备接管"
+                                _notice.value = "投屏已结束：发起端已取消，或被同账号其它设备接管"
                             }
                         }
                     }

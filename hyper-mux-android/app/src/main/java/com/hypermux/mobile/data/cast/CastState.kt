@@ -5,7 +5,6 @@ import com.hypermux.mobile.config.AppConfig
 import com.hypermux.mobile.data.api.ApiResult
 import com.hypermux.mobile.data.api.ApiService
 import com.hypermux.mobile.data.api.safeApiCall
-import com.hypermux.mobile.data.model.CastBriefVo
 import com.hypermux.mobile.data.model.CastIdReq
 import com.hypermux.mobile.data.model.CastRequestReq
 import com.hypermux.mobile.data.repo.DeviceRepo
@@ -16,14 +15,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /** 投屏结果（一次性 UI 事件，UI 消费后 [CastState.consumeOutcome] 清空） */
 sealed interface CastOutcome {
-    /** 目标端（电视 / 网页端 / 电脑端）已接受：手机弹「已接受你远程投屏的请求」，并停止本地播放 */
+    /** 目标端（电视 / 网页端 / 电脑端 / 手机端）已接受：目标端自行跳转播放页开播，投送流程到此结束 */
     data class Accepted(val targetName: String) : CastOutcome
     data object Rejected : CastOutcome
     data object Expired : CastOutcome
@@ -31,7 +29,7 @@ sealed interface CastOutcome {
     data class Failed(val msg: String) : CastOutcome
 }
 
-/** 等待目标端（电视 / 网页端 / 电脑端）确认中的上下文（UI 显示「正在等待「{目标名}」确认…」」） */
+/** 等待目标端（电视 / 网页端 / 电脑端 / 手机端）确认中的上下文（UI 显示「正在等待「{目标名}」确认…」」） */
 data class CastWaiting(
     val requestId: Long,
     val targetDeviceId: String,
@@ -42,11 +40,12 @@ data class CastWaiting(
 )
 
 /**
- * 投屏状态中枢（手机端 = 投送设备，**不是遥控器**）。
+ * 投屏状态中枢（手机端 = 投送设备，**不是遥控器，也不是守护者**）。
  *
- * 生命周期：send() → waiting（1s 轮 status，上限 17s）→ 终态 outcome
- *   ACCEPTED → active（手机停止本地播放，只留「取消投屏」）
- *   REJECTED / EXPIRED / CANCELLED → active 保持空
+ * 与 TV / 网页端同一口径：远程投屏只负责「让目标端跳转页面并开播」——
+ * send() → waiting（1s 轮 status，上限 17s）→ 终态 outcome，投送流程就此结束。
+ * 送达后不再保留任何 active 跟踪：目标端播多久、怎么结束、被谁接管，都与投送端无关；
+ * 要关闭投屏在目标端上操作即可。本机作为接收端的状态在 [CastReceiver]，与本类无关。
  *
  * 单并发在服务端强制（每账号最多 1 条 PENDING）；本类只保证同一时刻只有一个轮询任务。
  */
@@ -58,10 +57,6 @@ class CastState @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val _active = MutableStateFlow<CastBriefVo?>(null)
-    /** 当前生效的投屏（TV 正在播）。非空时手机本地播放必须停止且不再上报断点。 */
-    val active: StateFlow<CastBriefVo?> = _active
-
     private val _waiting = MutableStateFlow<CastWaiting?>(null)
     val waiting: StateFlow<CastWaiting?> = _waiting
 
@@ -72,42 +67,6 @@ class CastState @Inject constructor(
     val enabled: StateFlow<Boolean> = _enabled
 
     private var pollJob: Job? = null
-    private var watchJob: Job? = null
-
-    val isCasting: Boolean get() = _active.value != null
-
-    init {
-        // 投屏生效后开一个低频观察（5s 一轮）：TV 退出播放页 / 被同账号新请求接管时，
-        // 手机上的「已投送至 …」胶囊要能自己消失，不能一直挂着。
-        scope.launch {
-            _active.collect { a ->
-                if (a == null) {
-                    watchJob?.cancel()
-                    watchJob = null
-                } else if (watchJob?.isActive != true) {
-                    watchJob = startWatch(a.id)
-                }
-            }
-        }
-    }
-
-    private fun startWatch(activeId: Long): Job = scope.launch {
-        while (isActive) {
-            delay(WATCH_INTERVAL_MS)
-            val r = runCatching { safeApiCall(gson) { api.castCurrent() } }.getOrNull()
-            val cur = (r as? ApiResult.Ok)?.data?.active
-            if (cur == null || cur.id != activeId) {
-                _active.value = null
-                return@launch
-            }
-            if (cur.status == "REJECTED" || cur.status == "EXPIRED" ||
-                cur.status == "CANCELLED" || cur.status == "CLOSED"
-            ) {
-                _active.value = null
-                return@launch
-            }
-        }
-    }
 
     /** 投屏入口是否可用（管理后台可关；打开投屏时刷新一次） */
     fun refreshConfig() {
@@ -166,20 +125,7 @@ class CastState @Inject constructor(
                         when (r.data.status) {
                             "PENDING" -> Unit  // 继续等
                             "ACCEPTED" -> {
-                                // 用服务端的 current 补全展示字段（片名/集名/封面），失败退回本地已知信息。
-                                // id 必须对得上：本机此刻可能已被别的设备的投屏接管，不能把那条当成自己投出去的。
-                                val serverSide = runCatching { safeApiCall(gson) { api.castCurrent() } }
-                                    .getOrNull()?.let { (it as? ApiResult.Ok)?.data?.active }
-                                    ?.takeIf { it.id == w.requestId }
-                                _active.value = serverSide ?: CastBriefVo(
-                                    id = w.requestId,
-                                    status = "ACCEPTED",
-                                    targetDeviceId = w.targetDeviceId,
-                                    targetName = w.targetName,
-                                    movieId = w.movieId,
-                                    videoId = w.videoId,
-                                    positionMs = w.positionMs
-                                )
+                                // 送达即结束：目标端开始播，投送端不再跟踪（播完/结束/接管都归目标端）
                                 _waiting.value = null
                                 _outcome.value = CastOutcome.Accepted(w.targetName)
                                 return@launch
@@ -224,11 +170,13 @@ class CastState @Inject constructor(
         }
     }
 
-    /** 取消投屏（等待中或已投送都适用）。服务端幂等。 */
-    fun cancelActive(reason: String = "sender-cancel") {
-        val id = _waiting.value?.requestId ?: _active.value?.id
+    /**
+     * 取消「等待确认」中的请求（目标端确认之前还能撤；送达后没有取消入口，
+     * 关闭投屏在目标端上操作）。服务端幂等。
+     */
+    fun cancelPending(reason: String = "sender-cancel") {
+        val id = _waiting.value?.requestId
         _waiting.value = null
-        _active.value = null
         pollJob?.cancel()
         pollJob = null
         if (id == null) return
@@ -237,32 +185,12 @@ class CastState @Inject constructor(
         }
     }
 
-    /**
-     * 重启 / 切后台回来恢复投屏状态（不重复发起）。
-     *
-     * 只认"我投出去的"那一条：`cast/current` 是按账号查的，而本机现在也可能是别人的投屏目标
-     * （手机端已开接收侧）。把别人那条当成自己的，会让本机莫名停播并挂出「已投送至」胶囊。
-     */
-    fun restore() {
-        if (_active.value != null) return
-        scope.launch {
-            val r = safeApiCall(gson) { api.castCurrent() }
-            if (r !is ApiResult.Ok) return@launch
-            val cur = r.data.active ?: return@launch
-            val mine = deviceRepo.deviceId()
-            if (cur.senderDeviceId == null || cur.senderDeviceId == mine) _active.value = cur
-        }
-    }
-
     /** 登出时清空（避免把上一账号的投屏状态带过去） */
     fun clear() {
         _waiting.value = null
-        _active.value = null
         _outcome.value = null
         pollJob?.cancel()
         pollJob = null
-        watchJob?.cancel()
-        watchJob = null
     }
 
     fun consumeOutcome() {
@@ -272,10 +200,5 @@ class CastState @Inject constructor(
     /** 登录成功 / 打开投屏入口时的顺手注册（幂等） */
     fun registerSelf() {
         deviceRepo.registerSelfAsync()
-    }
-
-    private companion object {
-        /** 投屏生效后的低频观察间隔 */
-        const val WATCH_INTERVAL_MS = 5_000L
     }
 }

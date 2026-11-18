@@ -7,7 +7,6 @@ import com.hypermux.mobile.data.cast.CastOutcome
 import com.hypermux.mobile.data.cast.CastReceiver
 import com.hypermux.mobile.data.cast.CastState
 import com.hypermux.mobile.data.cast.CastWaiting
-import com.hypermux.mobile.data.model.CastBriefVo
 import com.hypermux.mobile.data.model.CastDeviceVo
 import com.hypermux.mobile.data.model.CastPendingVo
 import com.hypermux.mobile.data.repo.DeviceRepo
@@ -21,7 +20,7 @@ import javax.inject.Inject
 /**
  * 投屏 ViewModel。手机端**同时是投送端和接收端**（本期已开"手机接手机"）：
  *
- *  - 投送侧状态在 [CastState]（@Singleton）：active / waiting / outcome；
+ *  - 投送侧状态在 [CastState]（@Singleton）：waiting / outcome（投出即送达，不再跟踪）；
  *  - 接收侧状态在 [CastReceiver]（@Singleton）：pending / launch / activeCastId / stopRequested。
  *
  * 两条线都放在单例里而不是 ViewModel 里，是因为播放页、详情页、「我的」页、导航壳各自
@@ -43,8 +42,7 @@ class CastViewModel @Inject constructor(
     private val _lastTargetId = MutableStateFlow<String?>(null)
     val lastTargetId: StateFlow<String?> = _lastTargetId
 
-    /** 当前生效的投屏（目标端正在播）；非空时手机本地播放必须停止 */
-    val active: StateFlow<CastBriefVo?> = cast.active
+    /** 投送侧只剩「等待中 + 一次性结果」：送达后不再跟踪（关闭投屏在目标端操作） */
     val waiting: StateFlow<CastWaiting?> = cast.waiting
     val outcome: StateFlow<CastOutcome?> = cast.outcome
     val enabled: StateFlow<Boolean> = cast.enabled
@@ -94,7 +92,7 @@ class CastViewModel @Inject constructor(
         )
     }
 
-    fun cancelCast() = cast.cancelActive()
+    fun cancelCast() = cast.cancelPending()
 
     fun dismissOutcome() = cast.consumeOutcome()
 
